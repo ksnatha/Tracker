@@ -1,5 +1,6 @@
 package com.tracker.workflow.integration;
 
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
@@ -14,7 +15,7 @@ import javax.sql.DataSource;
 @TestConfiguration
 /*@EnableAutoConfiguration
 @ComponentScan(basePackages = {"com.odyssey"})*/
-//@SpringBootApplication(scanBasePackages = "com.tracker")
+@SpringBootApplication(scanBasePackages = "com.tracker")
 public class TestConfig {
 
     /**
