@@ -1,0 +1,160 @@
+@Service
+public class EventAuditService {
+    private final EventAuditRepository auditRepository;
+    private final ObjectMapper objectMapper;
+    
+    public EventAuditService(EventAuditRepository auditRepository, ObjectMapper objectMapper) {
+        this.auditRepository = auditRepository;
+        this.objectMapper = objectMapper;
+    }
+    
+    @Async
+    public CompletableFuture<EventAudit> recordEventPublished(Object event) {
+        EventAudit audit = new EventAudit();
+        audit.setEventId(UUID.randomUUID().toString());
+        audit.setEventType(event.getClass().getSimpleName());
+        audit.setEventData(serializeEvent(event));
+        audit.setStatus(EventStatus.PUBLISHED);
+        audit.setCreatedAt(LocalDateTime.now());
+        
+        return CompletableFuture.completedFuture(auditRepository.save(audit));
+    }
+    
+    @Async
+    public void recordEventProcessing(String eventId, String listenerClass, String listenerMethod) {
+        auditRepository.findByEventId(eventId).ifPresent(audit -> {
+            audit.setListenerClass(listenerClass);
+            audit.setListenerMethod(listenerMethod);
+            audit.setStatus(EventStatus.PROCESSING);
+            audit.setProcessedAt(LocalDateTime.now());
+            auditRepository.save(audit);
+        });
+    }
+    
+    @Async
+    public void recordEventCompleted(String eventId, long processingTimeMs) {
+        auditRepository.findByEventId(eventId).ifPresent(audit -> {
+            audit.setStatus(EventStatus.COMPLETED);
+            audit.setProcessingTimeMs(processingTimeMs);
+            auditRepository.save(audit);
+        });
+    }
+    
+    @Async
+    public void recordEventFailed(String eventId, String errorMessage, long processingTimeMs) {
+        auditRepository.findByEventId(eventId).ifPresent(audit -> {
+            audit.setStatus(EventStatus.FAILED);
+            audit.setErrorMessage(errorMessage);
+            audit.setProcessingTimeMs(processingTimeMs);
+            auditRepository.save(audit);
+        });
+    }
+    
+    private String serializeEvent(Object event) {
+        try {
+            return objectMapper.writeValueAsString(event);
+        } catch (Exception e) {
+            return "Serialization failed: " + e.getMessage();
+        }
+    }
+}
+
+
+
+
+@Aspect
+@Component
+public class EventAuditAspect {
+    private final EventAuditService auditService;
+    
+    @Around("@annotation(org.springframework.event.EventListener)")
+    public Object auditEventListener(ProceedingJoinPoint joinPoint) throws Throwable {
+        String methodName = joinPoint.getSignature().getName();
+        String className = joinPoint.getTarget().getClass().getSimpleName();
+        Object[] args = joinPoint.getArgs();
+        
+        if (args.length == 0) return joinPoint.proceed();
+        
+        Object event = args[0];
+        String eventId = extractEventId(event);
+        
+        auditService.recordEventProcessing(eventId, className, methodName);
+        
+        long startTime = System.currentTimeMillis();
+        try {
+            Object result = joinPoint.proceed();
+            long duration = System.currentTimeMillis() - startTime;
+            
+            auditService.recordEventCompleted(eventId, duration);
+            return result;
+        } catch (Exception e) {
+            long duration = System.currentTimeMillis() - startTime;
+            auditService.recordEventFailed(eventId, e.getMessage(), duration);
+            throw e;
+        }
+    }
+    
+    private String extractEventId(Object event) {
+        // Try to extract eventId from the event object
+        // This assumes your events have an eventId field
+        try {
+            Field eventIdField = event.getClass().getDeclaredField("eventId");
+            eventIdField.setAccessible(true);
+            return (String) eventIdField.get(event);
+        } catch (Exception e) {
+            return UUID.randomUUID().toString();
+        }
+    }
+}
+
+
+@Component
+public class AuditingEventPublisher {
+    private final ApplicationEventPublisher eventPublisher;
+    private final EventAuditService auditService;
+    
+    public AuditingEventPublisher(ApplicationEventPublisher eventPublisher, 
+                                 EventAuditService auditService) {
+        this.eventPublisher = eventPublisher;
+        this.auditService = auditService;
+    }
+    
+    public void publishEvent(Object event) {
+        // Record the event publication
+        CompletableFuture<EventAudit> auditFuture = auditService.recordEventPublished(event);
+        
+        // Add eventId to the event if it doesn't have one
+        if (event instanceof AuditableEvent) {
+            auditFuture.thenAccept(audit -> 
+                ((AuditableEvent) event).setEventId(audit.getEventId()));
+        }
+        
+        eventPublisher.publishEvent(event);
+    }
+}
+
+
+
+@Configuration
+@EnableAsync
+public class EventAuditConfig {
+    
+    @Bean
+    public TaskExecutor eventAuditExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(5);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("event-audit-");
+        executor.initialize();
+        return executor;
+    }
+    
+    @Bean
+    public ObjectMapper eventObjectMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        return mapper;
+    }
+}
