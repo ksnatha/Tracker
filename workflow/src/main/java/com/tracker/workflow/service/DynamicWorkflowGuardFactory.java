@@ -17,9 +17,17 @@ public class DynamicWorkflowGuardFactory {
     private final WorkflowExpressionEvaluator expressionEvaluator;
     
     public Guard<String, String> createGuard(String guardExpression) {
+        if (guardExpression == null || guardExpression.trim().isEmpty()) {
+            return context -> true;
+        }
+        
         return context -> {
             try {
                 Map<String, Object> processData = getProcessData(context);
+                if (processData.isEmpty()) {
+                    return false;
+                }
+                
                 Map<String, Object> contextData = getContextData(context);
                 
                 return expressionEvaluator.evaluate(guardExpression, processData, contextData);

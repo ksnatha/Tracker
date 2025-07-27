@@ -21,6 +21,10 @@ public class DynamicWorkflowActionFactory {
     private final WorkflowTaskAssignmentService assignmentService;
     
     public Action<String, String> createAction(Map<String, Object> actionConfig) {
+        if (actionConfig == null || actionConfig.isEmpty()) {
+            return context -> {}; // No-op action
+        }
+        
         String actionType = (String) actionConfig.get("type");
         
         if (actionType == null) {

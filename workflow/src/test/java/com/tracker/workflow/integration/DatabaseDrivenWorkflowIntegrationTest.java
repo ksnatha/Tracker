@@ -42,11 +42,11 @@ public class DatabaseDrivenWorkflowIntegrationTest extends AbstractIntegrationTe
 
     @BeforeEach
     void setUp() {
-        workflowDefinitionRepository.deleteAll();
-        userRoleRepository.deleteAll();
+        cleanupTestData();
     }
 
     @Test
+    @org.springframework.transaction.annotation.Transactional
     void testWorkflowMigrationAndActivation() {
         Optional<WorkflowDefinition> beforeMigration = workflowDefinitionService.getActiveWorkflow("Tracker-core-workflow");
         assertFalse(beforeMigration.isPresent());
@@ -55,7 +55,7 @@ public class DatabaseDrivenWorkflowIntegrationTest extends AbstractIntegrationTe
 
         Optional<WorkflowDefinition> afterMigration = workflowDefinitionService.getActiveWorkflow("Tracker-core-workflow");
         assertTrue(afterMigration.isPresent());
-        assertEquals("1.0", afterMigration.get().getVersion());
+        assertEquals("1.0.0", afterMigration.get().getVersion());
         assertTrue(afterMigration.get().getIsActive());
         assertEquals(5, afterMigration.get().getStates().size());
         assertEquals(4, afterMigration.get().getTransitions().size());
@@ -86,10 +86,16 @@ public class DatabaseDrivenWorkflowIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void testRoleBasedTaskAssignment() {
-        UserRole financeManager1 = new UserRole();
-        financeManager1.setUserId("finance.user1");
         WorkflowRole financeRole = new WorkflowRole();
         financeRole.setRoleName("finance-manager");
+        financeRole.setDescription("Finance Manager Role");
+        
+        if (workflowRoleRepository != null) {
+            financeRole = workflowRoleRepository.save(financeRole);
+        }
+
+        UserRole financeManager1 = new UserRole();
+        financeManager1.setUserId("finance.user1");
         financeManager1.setRole(financeRole);
         userRoleRepository.save(financeManager1);
 
@@ -125,6 +131,7 @@ public class DatabaseDrivenWorkflowIntegrationTest extends AbstractIntegrationTe
     }
 
     @Test
+    @org.springframework.transaction.annotation.Transactional
     void testDatabaseDrivenWorkflowConfiguration() {
         migrationService.migrateHardcodedWorkflowToDatabase();
 
@@ -132,6 +139,11 @@ public class DatabaseDrivenWorkflowIntegrationTest extends AbstractIntegrationTe
         assertTrue(workflow.isPresent());
 
         WorkflowDefinition definition = workflow.get();
+        
+        definition.getStates().size();
+        definition.getTransitions().size(); 
+        definition.getTaskAssignments().size();
+        
         assertNotNull(definition.getStates());
         assertNotNull(definition.getTransitions());
         assertNotNull(definition.getTaskAssignments());

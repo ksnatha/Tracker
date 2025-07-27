@@ -52,6 +52,11 @@ public class WorkflowMigrationService {
         definition.setCreatedDate(LocalDateTime.now());
         definition.setIsActive(false);
         
+        definition.setStates(new java.util.ArrayList<>());
+        definition.setTransitions(new java.util.ArrayList<>());
+        definition.setTaskAssignments(new java.util.ArrayList<>());
+        definition.setRules(new java.util.ArrayList<>());
+        
         return workflowDefinitionRepository.save(definition);
     }
     
@@ -71,7 +76,11 @@ public class WorkflowMigrationService {
         WorkflowStateDefinition completed = createState(definition, "COMPLETED", 
             WorkflowStateDefinition.StateType.END, "Completed", 5);
         
-        return Arrays.asList(businessReview, financeApproval, ownerReview, managerReview, completed);
+        List<WorkflowStateDefinition> states = Arrays.asList(businessReview, financeApproval, ownerReview, managerReview, completed);
+        
+        definition.getStates().addAll(states);
+        
+        return states;
     }
     
     private WorkflowStateDefinition createState(WorkflowDefinition definition, String stateName, 
@@ -93,17 +102,19 @@ public class WorkflowMigrationService {
         WorkflowStateDefinition managerReview = findStateByName(states, "PENDING_PLANNING_MANAGER_REVIEW");
         WorkflowStateDefinition completed = findStateByName(states, "COMPLETED");
         
-        createTransition(definition, businessReview, financeApproval, "PLANNING_BUSINESS_SUBMIT", 
+        WorkflowTransitionDefinition t1 = createTransition(definition, businessReview, financeApproval, "PLANNING_BUSINESS_SUBMIT", 
             "Business Review to Finance Approval", createTaskGroupAction());
         
-        createTransition(definition, financeApproval, ownerReview, "PLANNING_FINANCE_APPROVE", 
+        WorkflowTransitionDefinition t2 = createTransition(definition, financeApproval, ownerReview, "PLANNING_FINANCE_APPROVE", 
             "Finance Approval to Owner Review", createTaskGroupAction());
         
-        createTransition(definition, ownerReview, managerReview, "PLANNING_OWNER_SUBMIT", 
+        WorkflowTransitionDefinition t3 = createTransition(definition, ownerReview, managerReview, "PLANNING_OWNER_SUBMIT", 
             "Owner Review to Manager Review", createTaskGroupAction());
         
-        createTransition(definition, managerReview, completed, "PLANNING_MANAGER_SUBMIT", 
+        WorkflowTransitionDefinition t4 = createTransition(definition, managerReview, completed, "PLANNING_MANAGER_SUBMIT", 
             "Manager Review to Completed", createCompleteProcessAction());
+        
+        definition.getTransitions().addAll(Arrays.asList(t1, t2, t3, t4));
     }
     
     private WorkflowTransitionDefinition createTransition(WorkflowDefinition definition, 
@@ -124,31 +135,38 @@ public class WorkflowMigrationService {
     }
     
     private void createTaskAssignments(WorkflowDefinition definition, List<WorkflowStateDefinition> states) {
-        createRoleBasedAssignment(definition, findStateByName(states, "PENDING_PLANNING_BUSINESS_REVIEW"), 
+        WorkflowTaskAssignment a1 = createRoleBasedAssignment(definition, findStateByName(states, "PENDING_PLANNING_BUSINESS_REVIEW"), 
             List.of("BUSINESS_REVIEWER"), CompletionStrategy.ANY_ONE, "Business Review Task", 
             "Please review the business requirements and planning details");
         
-        createRoleBasedAssignment(definition, findStateByName(states, "PENDING_PLANNING_FINANCE_APPROVAL"), 
+        WorkflowTaskAssignment a2 = createRoleBasedAssignment(definition, findStateByName(states, "PENDING_PLANNING_FINANCE_APPROVAL"), 
             List.of("FINANCE_APPROVER"), CompletionStrategy.ANY_ONE, "Finance Approval Task", 
             "Please review and approve the financial aspects of this request");
         
-        createRoleBasedAssignment(definition, findStateByName(states, "PENDING_PLANNING_OWNER_REVIEW"), 
+        WorkflowTaskAssignment a3 = createRoleBasedAssignment(definition, findStateByName(states, "PENDING_PLANNING_OWNER_REVIEW"), 
             List.of("OWNER_REVIEWER"), CompletionStrategy.ANY_ONE, "Owner Review Task", 
             "Please review ownership and responsibility assignments");
         
-        createRoleBasedAssignment(definition, findStateByName(states, "PENDING_PLANNING_MANAGER_REVIEW"), 
+        WorkflowTaskAssignment a4 = createRoleBasedAssignment(definition, findStateByName(states, "PENDING_PLANNING_MANAGER_REVIEW"), 
             List.of("MANAGER_REVIEWER"), CompletionStrategy.ANY_ONE, "Manager Review Task", 
             "Please provide final management review and approval");
+        
+        definition.getTaskAssignments().addAll(Arrays.asList(a1, a2, a3, a4));
     }
     
-    private void createRoleBasedAssignment(WorkflowDefinition definition, WorkflowStateDefinition state, 
+    private WorkflowTaskAssignment createRoleBasedAssignment(WorkflowDefinition definition, WorkflowStateDefinition state, 
                                           List<String> roleNames, CompletionStrategy strategy, 
                                           String taskName, String description) {
+        if (state.getId() == null) {
+            throw new IllegalArgumentException("State must be persisted before creating task assignment");
+        }
+        
         WorkflowTaskAssignment assignment = new WorkflowTaskAssignment();
         assignment.setWorkflowDefinition(definition);
         assignment.setState(state);
         assignment.setAssignmentType(WorkflowTaskAssignment.AssignmentType.ROLE);
         assignment.setCompletionStrategy(strategy);
+        assignment.setCreatedDate(LocalDateTime.now());
         
         Map<String, Object> assignmentConfig = new HashMap<>();
         assignmentConfig.put("roles", roleNames);
@@ -160,7 +178,10 @@ public class WorkflowMigrationService {
         taskTemplate.put("priority", "MEDIUM");
         assignment.setTaskTemplate(taskTemplate);
         
-        assignmentRepository.save(assignment);
+        WorkflowTaskAssignment saved = assignmentRepository.save(assignment);
+        log.debug("Created task assignment for state: {} with roles: {}", state.getStateName(), roleNames);
+        
+        return saved;
     }
     
     private WorkflowStateDefinition findStateByName(List<WorkflowStateDefinition> states, String stateName) {

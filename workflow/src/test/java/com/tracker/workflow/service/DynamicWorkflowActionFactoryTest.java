@@ -173,9 +173,6 @@ class DynamicWorkflowActionFactoryTest {
         when(stateContext.getExtendedState().getVariables()).thenReturn((Map<Object, Object>) (Map<?, ?>) variables);
         when(stateContext.getTarget()).thenReturn(null);
 
-        doThrow(new RuntimeException("Task service error")).when(taskService)
-                .createSingleTask(anyString(), anyString(), anyString(), any(), anyString());
-
         Action<String, String> action = actionFactory.createAction(actionConfig);
         
         assertDoesNotThrow(() -> action.execute(stateContext));

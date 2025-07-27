@@ -2,7 +2,9 @@ package com.tracker.workflow.integration;
 
 
 import com.tracker.bootstrap.TrackerBootstrapApplication;
+import com.tracker.workflow.repository.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
@@ -23,6 +25,36 @@ import org.springframework.test.annotation.DirtiesContext;
         "com.tracker.workflow"
 })*/
 public abstract class AbstractIntegrationTest {
+
+    @Autowired(required = false)
+    protected WorkflowTaskRepository workflowTaskRepository;
+    
+    @Autowired(required = false)
+    protected TaskGroupRepository taskGroupRepository;
+    
+    @Autowired(required = false)
+    protected ProcessHistoryRepository processHistoryRepository;
+    
+    @Autowired(required = false)
+    protected WorkflowRuleRepository workflowRuleRepository;
+    
+    @Autowired(required = false)
+    protected WorkflowDefinitionRepository workflowDefinitionRepository;
+    
+    @Autowired(required = false)
+    protected WorkflowStateDefinitionRepository workflowStateDefinitionRepository;
+    
+    @Autowired(required = false)
+    protected WorkflowTransitionDefinitionRepository workflowTransitionDefinitionRepository;
+    
+    @Autowired(required = false)
+    protected WorkflowTaskAssignmentRepository workflowTaskAssignmentRepository;
+    
+    @Autowired(required = false)
+    protected UserRoleRepository userRoleRepository;
+    
+    @Autowired(required = false)
+    protected WorkflowRoleRepository workflowRoleRepository;
 
     // Common test setup and utility methods can be added here
 
@@ -52,5 +84,36 @@ public abstract class AbstractIntegrationTest {
     }
 
     protected void cleanupTestData() {
+        if (taskGroupRepository != null) {
+            taskGroupRepository.deleteAll();
+        }
+        if (workflowTaskRepository != null) {
+            workflowTaskRepository.deleteAll();
+        }
+        if (processHistoryRepository != null) {
+            processHistoryRepository.deleteAll();
+        }
+        if (workflowRuleRepository != null) {
+            workflowRuleRepository.deleteAll();
+        }
+        
+        if (workflowTaskAssignmentRepository != null) {
+            workflowTaskAssignmentRepository.deleteAll();
+        }
+        if (workflowTransitionDefinitionRepository != null) {
+            workflowTransitionDefinitionRepository.deleteAll();
+        }
+        if (workflowStateDefinitionRepository != null) {
+            workflowStateDefinitionRepository.deleteAll();
+        }
+        if (workflowDefinitionRepository != null) {
+            workflowDefinitionRepository.deleteAll();
+        }
+        if (userRoleRepository != null) {
+            userRoleRepository.deleteAll();
+        }
+        if (workflowRoleRepository != null) {
+            workflowRoleRepository.deleteAll();
+        }
     }
 }
