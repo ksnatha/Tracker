@@ -1,9 +1,10 @@
 package com.tracker.workflow.model;
 
-import com.tracker.shared.util.MapToJsonConverter;
+import io.hypersistence.utils.hibernate.type.json.JsonType;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Type;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -13,7 +14,6 @@ import java.util.Map;
  */
 @Entity
 @Table(name = "workflow_tasks")
-
 @Data
 @NoArgsConstructor
 public class WorkflowTask {
@@ -41,9 +41,7 @@ public class WorkflowTask {
     private Integer reworkCount = 0;
     private String completedByUserId;
 
-    @Convert(converter = MapToJsonConverter.class)
-
+    @Type(JsonType.class)
     @Column(name = "task_data", columnDefinition = "jsonb")
-
     private Map<String, Object> taskData;
 }

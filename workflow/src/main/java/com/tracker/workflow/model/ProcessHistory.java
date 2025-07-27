@@ -1,9 +1,10 @@
 package com.tracker.workflow.model;
 
-import com.tracker.shared.util.MapToJsonConverter;
+import io.hypersistence.utils.hibernate.type.json.JsonType;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Type;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -36,6 +37,7 @@ public class ProcessHistory {
     private LocalDateTime timestamp;
     private String comments;
 
-    @Convert(converter = MapToJsonConverter.class)
+    @Type(JsonType.class)
+    @Column(name = "context_data", columnDefinition = "jsonb")
     private Map<String, Object> contextData;
 }

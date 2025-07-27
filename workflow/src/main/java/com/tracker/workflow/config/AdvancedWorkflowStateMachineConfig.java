@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 @Configuration
-@EnableStateMachineFactory
+@EnableStateMachineFactory(name = "legacyWorkflowStateMachineFactory")
 public class AdvancedWorkflowStateMachineConfig extends StateMachineConfigurerAdapter<WorkflowStates, WorkflowEvents> {
 
     @Autowired
