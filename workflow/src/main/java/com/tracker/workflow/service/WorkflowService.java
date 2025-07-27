@@ -8,6 +8,7 @@ import com.tracker.workflow.model.WorkflowEvents;
 import com.tracker.workflow.model.WorkflowStates;
 import com.tracker.workflow.repository.ProcessHistoryRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.statemachine.StateMachine;
 import org.springframework.statemachine.config.StateMachineFactory;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class WorkflowService {
 
+    @Qualifier("dynamicWorkflowStateMachineFactory")
     private final StateMachineFactory<WorkflowStates, WorkflowEvents> stateMachineFactory;
     private final WorkflowTaskService taskService;
     private final WorkflowRuleService ruleService;
