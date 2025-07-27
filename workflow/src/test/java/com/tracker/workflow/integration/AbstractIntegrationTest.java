@@ -6,7 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.test.annotation.DirtiesContext;
 
 /**
  * Base class for integration tests.
@@ -16,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 //@ContextConfiguration(classes ={TrackerBootstrapApplication.class, TestConfig.class})
 @SpringBootTest(classes = {TrackerBootstrapApplication.class, TestConfig.class})
 @ActiveProfiles("test")
-@Transactional
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 /*@ComponentScan(basePackages = {
         "com.tracker.main",
         "com.tracker.shared",
@@ -49,5 +49,8 @@ public abstract class AbstractIntegrationTest {
         processData.put("submittedBy", userId);
         processData.put("submittedDate", java.time.LocalDateTime.now().toString());
         return processData;
+    }
+
+    protected void cleanupTestData() {
     }
 }

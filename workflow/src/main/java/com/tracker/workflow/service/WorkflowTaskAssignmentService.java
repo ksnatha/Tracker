@@ -3,7 +3,7 @@ package com.tracker.workflow.service;
 import com.tracker.workflow.model.*;
 import com.tracker.workflow.repository.UserRoleRepository;
 import com.tracker.workflow.repository.WorkflowTaskAssignmentRepository;
-import com.tracker.workflow.service.DynamicWorkflowActionFactory.TaskAssignmentConfig;
+import com.tracker.workflow.dto.TaskAssignmentConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
@@ -60,8 +60,10 @@ public class WorkflowTaskAssignmentService {
         return new TaskAssignmentConfig(
             taskName,
             assignees,
-            assignment.getCompletionStrategy(),
-            description
+            assignment.getCompletionStrategy().toString(),
+            description,
+            assignment.getAssignmentType(),
+            assignees.isEmpty() ? "" : assignees.get(0)
         );
     }
     
@@ -84,8 +86,20 @@ public class WorkflowTaskAssignmentService {
     }
     
     @SuppressWarnings("unchecked")
+    public List<String> resolveRoleBasedAssignees(String roleName) {
+        return userRoleRepository.findUserIdsByRoleName(roleName);
+    }
+    
     private List<String> resolveRoleBasedAssignees(Map<String, Object> config) {
         List<String> assignees = new ArrayList<>();
+        
+        Object assigneeValue = config.get("assigneeValue");
+        if (assigneeValue instanceof String) {
+            String roleName = (String) assigneeValue;
+            List<String> usersInRole = userRoleRepository.findUserIdsByRoleName(roleName);
+            assignees.addAll(usersInRole);
+            log.debug("Found {} users for role: {}", usersInRole.size(), roleName);
+        }
         
         Object rolesObj = config.get("roles");
         if (rolesObj instanceof List) {
@@ -101,8 +115,26 @@ public class WorkflowTaskAssignmentService {
         return assignees;
     }
     
+    public List<String> resolveUserBasedAssignees(String userList) {
+        if (userList == null || userList.trim().isEmpty()) {
+            return new ArrayList<>();
+        }
+        
+        List<String> users = new ArrayList<>();
+        String[] userArray = userList.split(",");
+        for (String user : userArray) {
+            users.add(user.trim());
+        }
+        return users;
+    }
+    
     @SuppressWarnings("unchecked")
     private List<String> resolveUserBasedAssignees(Map<String, Object> config) {
+        Object assigneeValue = config.get("assigneeValue");
+        if (assigneeValue instanceof String) {
+            return resolveUserBasedAssignees((String) assigneeValue);
+        }
+        
         Object usersObj = config.get("users");
         if (usersObj instanceof List) {
             return new ArrayList<>((List<String>) usersObj);

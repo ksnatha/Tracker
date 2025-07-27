@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,7 +71,7 @@ public class WorkflowMigrationService {
         WorkflowStateDefinition completed = createState(definition, "COMPLETED", 
             WorkflowStateDefinition.StateType.END, "Completed", 5);
         
-        return List.of(businessReview, financeApproval, ownerReview, managerReview, completed);
+        return Arrays.asList(businessReview, financeApproval, ownerReview, managerReview, completed);
     }
     
     private WorkflowStateDefinition createState(WorkflowDefinition definition, String stateName, 

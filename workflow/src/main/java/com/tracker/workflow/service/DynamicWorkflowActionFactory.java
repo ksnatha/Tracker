@@ -2,6 +2,7 @@ package com.tracker.workflow.service;
 
 import com.tracker.workflow.model.CompletionStrategy;
 import com.tracker.workflow.model.WorkflowStates;
+import com.tracker.workflow.dto.TaskAssignmentConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.statemachine.StateContext;
@@ -50,11 +51,12 @@ public class DynamicWorkflowActionFactory {
                 TaskAssignmentConfig assignment = assignmentService.getAssignmentForState(processInstanceId, currentState);
                 
                 if (assignment != null) {
+                    CompletionStrategy strategy = CompletionStrategy.valueOf(assignment.getCompletionStrategy());
                     taskService.createTaskGroup(
                         processInstanceId,
                         assignment.getTaskName(),
                         assignment.getAssignees(),
-                        assignment.getCompletionStrategy(),
+                        strategy,
                         WorkflowStates.valueOf(currentState),
                         assignment.getDescription()
                     );
@@ -130,22 +132,4 @@ public class DynamicWorkflowActionFactory {
         return processId != null ? processId.toString() : "unknown";
     }
     
-    public static class TaskAssignmentConfig {
-        private final String taskName;
-        private final List<String> assignees;
-        private final CompletionStrategy completionStrategy;
-        private final String description;
-        
-        public TaskAssignmentConfig(String taskName, List<String> assignees, CompletionStrategy completionStrategy, String description) {
-            this.taskName = taskName;
-            this.assignees = assignees;
-            this.completionStrategy = completionStrategy;
-            this.description = description;
-        }
-        
-        public String getTaskName() { return taskName; }
-        public List<String> getAssignees() { return assignees; }
-        public CompletionStrategy getCompletionStrategy() { return completionStrategy; }
-        public String getDescription() { return description; }
-    }
 }

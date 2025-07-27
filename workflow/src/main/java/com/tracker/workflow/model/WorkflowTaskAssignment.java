@@ -1,8 +1,10 @@
 package com.tracker.workflow.model;
 
+import io.hypersistence.utils.hibernate.type.json.JsonType;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Type;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -28,6 +30,7 @@ public class WorkflowTaskAssignment {
     @Enumerated(EnumType.STRING)
     private AssignmentType assignmentType;
 
+    @Type(JsonType.class)
     @Column(name = "assignment_config", columnDefinition = "jsonb", nullable = false)
     private Map<String, Object> assignmentConfig;
 
@@ -35,6 +38,7 @@ public class WorkflowTaskAssignment {
     @Enumerated(EnumType.STRING)
     private CompletionStrategy completionStrategy;
 
+    @Type(JsonType.class)
     @Column(name = "task_template", columnDefinition = "jsonb")
     private Map<String, Object> taskTemplate;
 

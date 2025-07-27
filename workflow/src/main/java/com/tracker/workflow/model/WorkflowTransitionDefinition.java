@@ -1,8 +1,10 @@
 package com.tracker.workflow.model;
 
+import io.hypersistence.utils.hibernate.type.json.JsonType;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Type;
 
 import java.util.Map;
 
@@ -38,6 +40,7 @@ public class WorkflowTransitionDefinition {
     @Column(name = "guard_expression")
     private String guardExpression;
 
+    @Type(JsonType.class)
     @Column(name = "action_config", columnDefinition = "jsonb")
     private Map<String, Object> actionConfig;
 

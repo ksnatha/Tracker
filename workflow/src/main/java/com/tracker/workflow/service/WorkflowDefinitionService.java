@@ -83,6 +83,8 @@ public class WorkflowDefinitionService {
             workflow.setIsActive(false);
             workflowDefinitionRepository.save(workflow);
             log.info("Deactivated workflow: {}", workflowName);
+        } else {
+            throw new IllegalStateException("No active workflow found to deactivate: " + workflowName);
         }
     }
     

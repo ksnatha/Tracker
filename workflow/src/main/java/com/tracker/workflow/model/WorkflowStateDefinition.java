@@ -1,8 +1,10 @@
 package com.tracker.workflow.model;
 
+import io.hypersistence.utils.hibernate.type.json.JsonType;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Type;
 
 import java.util.Map;
 
@@ -34,6 +36,7 @@ public class WorkflowStateDefinition {
     @Column(name = "state_order")
     private Integer stateOrder;
 
+    @Type(JsonType.class)
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> metadata;
 
