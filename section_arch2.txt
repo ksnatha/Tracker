@@ -1,0 +1,173 @@
+@RestController
+@RequestMapping("/form")
+public class FormController {
+
+    @Autowired
+    private SectionServiceFactory sectionServiceFactory;
+
+    @Autowired
+    private SubmitService submitService;
+
+    // Save endpoint
+    @PostMapping("/save")
+    public ResponseEntity<?> saveSection(
+        @RequestParam String section,
+        @RequestParam String recordId,
+        @RequestBody SectionDto dto
+    ) {
+        SectionService service = sectionServiceFactory.getService(section);
+        service.save(recordId, dto);
+        return ResponseEntity.ok("Saved successfully");
+    }
+
+    // Submit endpoint
+    @PostMapping("/submit")
+    public ResponseEntity<?> submitForm(
+        @RequestParam String section,
+        @RequestParam String recordId,
+        @RequestBody SectionDto dto
+    ) {
+        SectionService service = sectionServiceFactory.getService(section);
+        service.save(recordId, dto); // Save current section
+
+        SubmissionResult result = submitService.validateAndSubmit(recordId);
+        if (result.isSuccess()) {
+            return ResponseEntity.ok("Submitted successfully");
+        } else {
+            return ResponseEntity.badRequest().body(result.getErrors());
+        }
+    }
+}
+
+
+public interface SectionService {
+    void save(String recordId, SectionDto dto);
+    SectionDto fetch(String recordId);
+    SectionValidator getValidator();
+}
+
+@Service
+public class SectionAService implements SectionService {
+
+    @Autowired private TableARepository tableARepo;
+    @Autowired private TableBRepository tableBRepo;
+    @Autowired private SectionAValidator validator;
+    @Autowired private SectionADtoMapper mapper;
+
+    @Override
+    public void save(String recordId, SectionDto dto) {
+        SectionADto sectionADto = (SectionADto) dto;
+        TableA entityA = mapper.toTableA(sectionADto, recordId);
+        TableB entityB = mapper.toTableB(sectionADto, recordId);
+        tableARepo.save(entityA);
+        tableBRepo.save(entityB);
+    }
+
+    @Override
+    public SectionDto fetch(String recordId) {
+        TableA entityA = tableARepo.findByRecordId(recordId);
+        TableB entityB = tableBRepo.findByRecordId(recordId);
+        return mapper.toDto(entityA, entityB);
+    }
+
+    @Override
+    public SectionValidator getValidator() {
+        return validator;
+    }
+}
+
+
+public interface SectionValidator {
+    ValidationResult validateForSave(SectionDto dto, String recordId);
+    ValidationResult validateForSubmit(SectionDto dto, String recordId);
+}
+
+@Component
+public class SectionAValidator implements SectionValidator {
+
+    @Override
+    public ValidationResult validateForSave(SectionDto dto, String recordId) {
+        // Basic field-level checks
+    }
+
+    @Override
+    public ValidationResult validateForSubmit(SectionDto dto, String recordId) {
+        // Business rules: mandatory fields, grid completeness, role checks
+    }
+}
+
+
+@Service
+public class SubmitService {
+
+    @Autowired private SectionServiceFactory serviceFactory;
+
+    public SubmissionResult validateAndSubmit(String recordId) {
+        Map<String, ValidationResult> errors = new HashMap<>();
+
+        for (String section : SectionRegistry.getAllSections()) {
+            SectionService service = serviceFactory.getService(section);
+            SectionDto dto = service.fetch(recordId);
+            ValidationResult result = service.getValidator().validateForSubmit(dto, recordId);
+            if (!result.isValid()) {
+                errors.put(section, result);
+            }
+        }
+
+        if (errors.isEmpty()) {
+            // Update record status to SUBMITTED
+            return SubmissionResult.success();
+        } else {
+            return SubmissionResult.failure(errors);
+        }
+    }
+}
+
+@Component
+public class SectionServiceFactory {
+
+    @Autowired private Map<String, SectionService> serviceMap;
+
+    public SectionService getService(String sectionCode) {
+        return serviceMap.get(sectionCode);
+    }
+}
+
+@Component
+public class SectionADtoMapper {
+
+    public TableA toTableA(SectionADto dto, String recordId) {
+        // Map fields from dto to TableA entity
+    }
+
+    public TableB toTableB(SectionADto dto, String recordId) {
+        // Map fields from dto to TableB entity
+    }
+
+    public SectionADto toDto(TableA entityA, TableB entityB) {
+        // Compose DTO from entities
+    }
+}
+
+
+public class SectionADto extends SectionDto {
+    private String name;
+    private List<ContactDto> contacts;
+    // other fields
+}
+
+public class ValidationResult {
+    private boolean valid;
+    private Map<String, String> fieldErrors;
+}
+
+public class SubmissionResult {
+    private boolean success;
+    private Map<String, ValidationResult> errors;
+
+    public static SubmissionResult success() { ... }
+    public static SubmissionResult failure(Map<String, ValidationResult> errors) { ... }
+}
+
+
+
