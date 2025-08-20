@@ -1,0 +1,215 @@
+// Marker Interfaces
+public interface Save {}
+public interface Submit {}
+
+// Domain Models
+@Entity
+public class SecA {
+    @Id private Long id;
+    private String name;
+    private Integer age;
+}
+
+@Entity
+public class SecB {
+    @Id private Long id;
+    private String email;
+    private String comments;
+}
+
+// DTOs
+public class SecADTO {
+    @NotBlank(groups = Save.class)
+    private String name;
+
+    @Min(value = 18, groups = Submit.class)
+    private Integer age;
+}
+
+public class SecBDTO {
+    @Email(groups = Save.class)
+    private String email;
+
+    @Size(min = 10, groups = Submit.class)
+    private String comments;
+}
+
+// ValidationContext
+public class ValidationContext {
+    private Class<?> validationGroup;
+    private Map<String, Object> sharedData = new HashMap<>();
+    private List<String> messages = new ArrayList<>();
+
+    public void setValidationGroup(Class<?> group) { this.validationGroup = group; }
+    public Class<?> getValidationGroup() { return validationGroup; }
+
+    public void put(String key, Object value) { sharedData.put(key, value); }
+    public <T> T get(String key, Class<T> type) { return type.cast(sharedData.get(key)); }
+
+    public void addMessage(String msg) { messages.add(msg); }
+    public List<String> getMessages() { return messages; }
+}
+
+// Validators
+@Component
+public class SecAValidator {
+    @Autowired private Validator beanValidator;
+
+    public void validate(SecADTO dto, ValidationContext context) {
+        Set<ConstraintViolation<SecADTO>> violations =
+            beanValidator.validate(dto, context.getValidationGroup());
+
+        for (ConstraintViolation<?> v : violations) {
+            context.addMessage("SecA " + v.getPropertyPath() + ": " + v.getMessage());
+        }
+
+        if (context.getValidationGroup() == Submit.class && dto.getAge() < 21) {
+            context.addMessage("SecA age must be at least 21 for submission.");
+        }
+    }
+}
+
+@Component
+public class SecBValidator {
+    @Autowired private Validator beanValidator;
+
+    public void validate(SecBDTO dto, ValidationContext context) {
+        Set<ConstraintViolation<SecBDTO>> violations =
+            beanValidator.validate(dto, context.getValidationGroup());
+
+        for (ConstraintViolation<?> v : violations) {
+            context.addMessage("SecB " + v.getPropertyPath() + ": " + v.getMessage());
+        }
+
+        if (context.getValidationGroup() == Submit.class && dto.getComments().contains("test")) {
+            context.addMessage("SecB comments must not contain the word 'test'.");
+        }
+    }
+}
+
+// Repositories
+@Repository
+public interface SecARepository extends JpaRepository<SecA, Long> {}
+
+@Repository
+public interface SecBRepository extends JpaRepository<SecB, Long> {}
+
+// SectionService Interface
+public interface SectionService {
+    void validate(ValidationContext context);
+    void save(ValidationContext context);
+}
+
+// Section Services
+@Service("SecA")
+public class SecAService implements SectionService {
+    @Autowired private SecAValidator validator;
+    @Autowired private SecARepository repository;
+
+    public void validate(ValidationContext context) {
+        SecADTO dto = context.get("SecA", SecADTO.class);
+        validator.validate(dto, context);
+    }
+
+    public void save(ValidationContext context) {
+        SecADTO dto = context.get("SecA", SecADTO.class);
+        repository.save(new SecA(dto.getName(), dto.getAge()));
+    }
+}
+
+@Service("SecB")
+public class SecBService implements SectionService {
+    @Autowired private SecBValidator validator;
+    @Autowired private SecBRepository repository;
+
+    public void validate(ValidationContext context) {
+        SecBDTO dto = context.get("SecB", SecBDTO.class);
+        validator.validate(dto, context);
+    }
+
+    public void save(ValidationContext context) {
+        SecBDTO dto = context.get("SecB", SecBDTO.class);
+        repository.save(new SecB(dto.getEmail(), dto.getComments()));
+    }
+}
+
+// Factory
+@Component
+public class SectionServiceFactory {
+    @Autowired private ApplicationContext context;
+
+    public SectionService getService(String sectionName) {
+        return (SectionService) context.getBean(sectionName);
+    }
+
+    public List<String> getAllSectionNames() {
+        return List.of("SecA", "SecB");
+    }
+}
+
+// Orchestration Service
+@Service
+public class SectionOrchestrator {
+    @Autowired private SectionServiceFactory factory;
+
+    public void save(String sectionName, Object dto) {
+        ValidationContext context = new ValidationContext();
+        context.setValidationGroup(Save.class);
+        context.put(sectionName, dto);
+
+        SectionService service = factory.getService(sectionName);
+        service.validate(context);
+
+        if (!context.getMessages().isEmpty()) {
+            throw new ValidationException(context.getMessages().toString());
+        }
+
+        service.save(context);
+    }
+
+    public void submit(String sectionName, Map<String, Object> allDtos) {
+        ValidationContext context = new ValidationContext();
+        context.setValidationGroup(Submit.class);
+
+        for (Map.Entry<String, Object> entry : allDtos.entrySet()) {
+            context.put(entry.getKey(), entry.getValue());
+        }
+
+        for (String name : factory.getAllSectionNames()) {
+            factory.getService(name).validate(context);
+        }
+
+        if (!context.getMessages().isEmpty()) {
+            throw new ValidationException(context.getMessages().toString());
+        }
+
+        factory.getService(sectionName).save(context);
+    }
+}
+
+// Controller
+@RestController
+@RequestMapping("/sections")
+public class SectionController {
+    @Autowired private SectionOrchestrator orchestrator;
+
+    @PostMapping("/save/{section}")
+    public ResponseEntity<?> save(@PathVariable String section, @RequestBody Object dto) {
+        try {
+            orchestrator.save(section, dto);
+            return ResponseEntity.ok("Saved " + section);
+        } catch (ValidationException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/submit/{section}")
+    public ResponseEntity<?> submit(@PathVariable String section, @RequestBody Map<String, Object> allDtos) {
+        try {
+            orchestrator.submit(section, allDtos);
+            return ResponseEntity.ok("Submitted " + section);
+        } catch (ValidationException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+}
