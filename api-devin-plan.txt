@@ -1,0 +1,143 @@
+Create a Spring Boot REST API POC that demonstrates pull-based and push-based 
+data filtering with domain grouping. This is a proof of concept to compare 
+two integration approaches.
+
+PROJECT REQUIREMENTS:
+
+Technology Stack:
+- Java 17
+- Spring Boot 3.2.x (latest stable)
+- Maven
+- SpringDoc OpenAPI (Swagger UI)
+- Lombok
+- No database (use hardcoded mock data)
+
+Architecture Overview:
+This API demonstrates sharing data with multiple downstream applications 
+where each app needs different subsets of data. We have 5 domain groups:
+user, billing, permissions, inventory, analytics. For POC, implement 3 
+domains: user, billing, permissions.
+
+DOMAIN MODELS:
+
+1. User Domain:
+   - id (String)
+   - name (String)
+   - email (String)
+   - avatar (String - URL)
+   - createdAt (LocalDateTime)
+   - lastLogin (LocalDateTime)
+
+2. Billing Domain:
+   - subscriptionTier (String - e.g., "basic", "premium")
+   - balance (BigDecimal)
+   - currency (String - e.g., "USD")
+   - paymentMethod (String)
+   - nextBillingDate (LocalDate)
+
+3. Permissions Domain:
+   - roles (List<String>)
+   - capabilities (List<String>)
+   - accessLevel (Integer)
+   - restrictions (Map<String, Object>)
+
+MOCK DATA:
+Create hardcoded data for 3 users (IDs: "123", "456", "789") with complete 
+data for all 3 domains. Make the data realistic.
+
+CORE FUNCTIONALITY:
+
+1. PULL API (GET endpoint):
+   Endpoint: GET /api/data
+   Parameters:
+   - userId (required, query param)
+   - groups (optional, comma-separated string like "user,billing")
+   
+   Behavior:
+   - If no groups specified, return all 3 domains
+   - If groups specified, return only requested domains
+   - Return 404 if user not found
+   - Response structure: { "user": {...}, "billing": {...}, "permissions": {...} }
+
+2. PUSH SIMULATION (POST endpoint):
+   Endpoint: POST /api/simulate-push
+   Request Body:
+   {
+     "userId": "123",
+     "domain": "user"  // which domain changed
+   }
+   
+   Behavior:
+   - Simulate what would be pushed to partner webhooks when a domain changes
+   - Reference a partner registry with 3 mock partners:
+     * Partner A: subscribes to [user, permissions]
+     * Partner B: subscribes to [user, billing]
+     * Partner C: subscribes to [billing, permissions]
+   - Return which partners would be notified and what data they'd receive
+   - Apply same filtering logic as pull API
+   - Response shows: partner ID, webhook URL, filtered payload for each partner
+
+3. CRITICAL REQUIREMENT - Filtering Logic Reuse:
+   Create a reusable filtering utility that:
+   - Takes full data (all domains)
+   - Takes requested groups (Set<String>)
+   - Returns filtered data with only requested groups
+   - This SAME logic must be used by both pull endpoint and push simulation
+   - Document this clearly to show the concept
+
+SWAGGER DOCUMENTATION:
+- Full OpenAPI 3 documentation
+- Clear descriptions for all endpoints
+- Example requests and responses for:
+  * Pull with no filter (all domains)
+  * Pull with single group
+  * Pull with multiple groups
+  * Push simulation for each domain
+- Show which partners receive what data
+
+EXCEPTION HANDLING:
+- User not found → 404 with clear message
+- Invalid domain in push simulation → 400
+- Validation errors → 400
+- Global exception handler
+
+PROJECT STRUCTURE:
+Use standard Spring Boot structure with:
+- Controllers (REST endpoints)
+- Services (business logic)
+- Models (DTOs for domains, requests, responses)
+- Utils (filtering logic)
+- Config (Swagger configuration)
+- Exception handling
+
+DELIVERABLES:
+1. Complete working Spring Boot application
+2. README.md with:
+   - How to run
+   - API endpoint documentation
+   - Example curl commands
+   - Architecture explanation
+3. DEMO_SCRIPT.md with step-by-step demo instructions
+4. All code properly commented
+5. Swagger UI accessible at /swagger-ui.html
+
+SUCCESS CRITERIA:
+- Application runs on port 8080
+- Swagger UI works and is well-documented
+- Pull API filters correctly based on groups parameter
+- Push simulation shows correct partner notifications with filtered data
+- Same filtering logic demonstrably used by both endpoints
+- All endpoints return proper HTTP status codes
+- Code is clean, well-organized, and follows Spring Boot best practices
+
+DEMONSTRATION SCENARIOS TO SUPPORT:
+1. Pull API: Request user 123 with no groups → get all 3 domains
+2. Pull API: Request user 123 with groups=user → get only user domain
+3. Pull API: Request user 123 with groups=user,billing → get user and billing
+4. Push: Simulate user domain change → show Partner A and B get notifications
+5. Push: Simulate billing change → show Partner B and C get notifications
+6. Verify filtering logic is identical for both scenarios
+
+Please create this project, test all endpoints, and ensure Swagger UI 
+displays everything clearly for demonstration purposes. This is a POC to 
+prove the concept before building the real system.
