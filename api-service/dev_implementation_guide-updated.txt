@@ -1,0 +1,2847 @@
+# Data Integration Service - Development Implementation Guide
+
+## Document Information
+- **Version:** 2.0 (Revised - Simplified for Production Reality)
+- **Date:** November 2, 2025
+
+---
+
+## 🎯 Key Simplifications in Version 2.0
+
+This revised guide removes over-engineered solutions and focuses on practical, production-ready patterns:
+
+**✅ SIMPLIFIED:**
+1. **Single Connection Pool Only** - Removed dual datasource complexity (same DB = single pool)
+2. **Resilience4j Library** - Using battle-tested library instead of custom circuit breaker 
+3. **Spring @Retry** - Using annotation-based retry instead of custom 24-hour scheduler 
+4. **Minimal Admin API** - MVP focuses on 5 critical endpoints
+5. **Core Metrics Only** - Starting with 4 essential metrics
+6. **In-Memory State for MVP** - Rate limiting, circuit breaker, ES checkpoint in-memory for single-pod deployment
+
+**⏱️ IMPACT:**
+- Maintenance burden: Significantly reduced
+- Scalability: Clear path from MVP to production scale
+
+**📋 MVP SCOPE:**
+Optimized for **50 records/day workload** with **4-5 partners** initially. All solutions are production-ready but right-sized for actual needs, not theoretical extremes.
+
+---
+
+## Table of Contents
+1. [Executive Summary](#executive-summary)
+2. [System Architecture](#system-architecture)
+3. [Technical Stack](#technical-stack)
+4. [Database Design](#database-design)
+5. [Component Design](#component-design)
+6. [API Specifications](#api-specifications)
+7. [Configuration Management](#configuration-management)
+8. [Error Handling Strategy](#error-handling-strategy)
+9. [Performance & Isolation](#performance--isolation)
+10. [Security](#security)
+11. [Monitoring & Observability](#monitoring--observability)
+12. [Testing Strategy](#testing-strategy)
+13. [Deployment Plan](#deployment-plan)
+14. [Development Tasks](#development-tasks)
+
+---
+
+## 1. Executive Summary
+
+### Purpose
+Build a new **Data Integration Service** that exposes workflow application data to external partner systems through multiple consumption channels (Search, Bulk, Events) with a unified response structure.
+
+### Key Requirements
+- **Search API**: Elasticsearch-backed search returning summary data (~60% of fields)
+- **Bulk API**: Paginated batch data access for partner synchronization (2-3 times per day)
+- **Event Push**: Real-time workflow state change notifications via webhooks
+- **AI Agent API**: Detailed data including all descriptive fields (~100% of fields)
+
+### Core Design Principles
+1. **Unified Response Structure**: Same JSON shape across all APIs (domains nullable based on partner config)
+2. **Configuration-Driven**: Partner onboarding via config, not code changes
+3. **Performance Isolation**: Bulk operations don't impact Search/Events (separate thread pools)
+4. **Reliability**: Comprehensive error handling, retry mechanisms, dead letter queues
+5. **View-Based Data Access**: Query database views instead of joining entities
+
+### Integration Pattern
+Core Workflow Application publishes Spring Events when workflow state changes. An async event listener in the Core App makes a REST API call to the Data Integration Service, which then processes the event and notifies partner systems via configured webhooks.
+
+---
+
+## 2. System Architecture
+
+### High-Level Architecture
+
+**Component Overview:**
+- **Core Workflow Application**: Existing application managing workflows, publishes events on state changes
+- **Data Integration Service**: NEW microservice that exposes data to partners
+- **Database Views**: Read-only views (summary and detailed) in Core App database
+- **Elasticsearch**: Search index for quick ID lookup
+- **Partner Systems**: External systems consuming data via APIs/webhooks
+
+**Data Flow:**
+
+**Event Flow:**
+1. Core Workflow App: State change occurs
+2. Core App: Spring Event published (within transaction)
+3. Core App: Async listener catches event
+4. Core App: REST call to Integration Service (with retry logic)
+5. Integration Service: Receives event, queues for processing
+6. Integration Service: Queries database view for application data
+7. Integration Service: Filters data per partner configuration
+8. Integration Service: Calls partner webhooks in parallel
+9. Integration Service: Logs delivery status, handles failures
+
+**Search Flow:**
+1. Partner: Calls Search API with ~20 search parameters
+2. Integration Service: Queries Elasticsearch with search params
+3. Elasticsearch: Returns matching application IDs
+4. Integration Service: Fetches application data from summary view
+5. Integration Service: Filters data per partner configuration
+6. Integration Service: Returns JSON response
+
+**Bulk Flow:**
+1. Partner: Calls Bulk IDs API with "since" timestamp
+2. Integration Service: Queries summary view for IDs modified since timestamp
+3. Integration Service: Returns list of (ID, lastModified)
+4. Partner: Calls Bulk Data API with subset of IDs (paginated)
+5. Integration Service: Fetches data from summary view
+6. Integration Service: Filters per partner config, returns page
+
+### Architectural Decisions
+
+**Why Separate Service?**
+- Core App focuses on workflow management
+- Integration Service handles data distribution concerns
+- Independent scaling and deployment
+- Core App performance unaffected by partner queries
+
+**Why Database Views?**
+- Pre-joined data (no complex joins in application)
+- Database optimizer handles query planning
+- Consistent data composition
+- Two views: summary (60% fields) and detailed (100% fields)
+- 75% of traffic uses lightweight summary view
+
+**Why Configuration-Driven?**
+- Add new partners without code deployment
+- Change partner data requirements independently
+- Clear audit trail of configuration changes
+- Easy to test and validate partner-specific behavior
+
+---
+
+## 3. Technical Stack
+
+### Framework & Core Libraries
+- **Spring Boot 3.2.x**: Core framework
+- **Java 17 or 21**: Programming language
+- **Maven 3.9.x**: Build tool
+- **Spring Data JPA**: Database access (single datasource)
+- **HikariCP**: Connection pooling (included in Spring Boot)
+- **MapStruct 1.5.x**: DTO mapping (compile-time, no reflection)
+- **Resilience4j 2.1.x**: Circuit breaker and retry 
+
+### Data & Search
+- **Oracle**: Database (same as Core App)
+- **Spring Data Elasticsearch 5.2.x**: Search integration
+
+
+### Utilities & Monitoring
+- **Lombok 1.18.x**: Reduce boilerplate
+- **Google Guava 32.x**: Rate limiting utilities (in-memory, single-pod)
+- **Jackson**: JSON serialization (included in Spring Boot)
+- **Spring Boot Actuator**: Metrics and health checks
+- **Micrometer**: Metrics collection (need analysis)
+- **Prometheus**: Metrics export format (need analysis)
+
+### Testing
+- **JUnit 5**: Unit testing
+- **Mockito**: Mocking framework
+- **Spring Boot Test**: Integration testing
+
+
+### Documentation
+- **SpringDoc OpenAPI 2.x**: API documentation (Swagger UI)
+
+### Why These Choices
+
+**Resilience4j over Custom Code**:
+- Circuit breaker and retry are complex to implement correctly
+- Resilience4j is proven, tested, and provides excellent metrics
+- Configuration-based (no custom state management code needed)
+
+
+**MapStruct over ModelMapper**:
+- Compile-time code generation (no reflection overhead)
+- Type-safe mapping
+- Clear error messages at compile time
+- Better performance
+
+**Single Datasource**:
+- Same database = single pool is natural design
+- No entity manager complexity
+- No transaction coordination issues
+- Thread isolation provides workload separation
+
+**Guava for Rate Limiting**: (needs analysis)
+- Simple, in-memory, works well for single pod
+- For multi-pod: Upgrade to Redis-based rate limiting (future enhancement)
+
+### Single-Pod Assumptions (Documented)
+
+The MVP makes these assumptions for simplicity:
+- **Single pod deployment**: Rate limiting, circuit breaker state, ES sync checkpoint are in-memory: NOTE: For MVP we need at least two pods. Cannot have redis. Since it is served internally, we can avoid rate limiting.
+- **Low traffic**: 50 records/day workload doesn't require distributed coordination (NEED COUNT FROM PROD)
+- **Future scaling**: When deploying multiple pods, upgrade to Redis for shared state
+
+These are acceptable trade-offs for MVP that reduce complexity significantly.
+
+### Infrastructure Requirements
+- **Runtime**: OpenJDK 17/21, 2-4GB heap, 2-4 CPU cores
+- **Database**: Read-only access to Core App database views
+- **Network**: Access to Core App API and partner webhook endpoints
+
+---
+
+## 4. Database Design
+
+### Database Views (In Core App Database)
+
+
+
+#### Summary View: application_data_summary_view
+**Purpose**: Primary view for Search, Bulk, and Event APIs
+**Coverage**: ~60% of total fields (metadata and key fields only)
+
+**Structure**:
+VW_R_SUMMARY
+VW_R_DETAILED
+
+VW_CONT
+
+VW_LS_SUMMARY
+VW_LS_DETAILED
+
+VW_ISSUES_SUMMARY
+VW_ISSUES_DETAILED
+
+VW_PR_SUMMARY
+VW_PR_DETAILED
+
+VW_M_SUMMARY
+vw_M_DETAILED
+
+VW_EC_SUMMARY
+VW_EC_DETAILED
+
+VW_Q_DETAILED
+
+VW_AT_SUMMARY
+VW_AT_DETAILED
+
+
+**Performance Considerations**:
+- Index on primary key
+- Index on last_edited_date (for bulk sync queries)
+- Index on workflow_status (for filtering)
+- Index on other columns as needed.
+- Consider materialized view if query performance is slow
+
+#### Detailed Views:
+**Purpose**: AI Agent API 
+**Coverage**: 100% of fields including all descriptive content
+
+**Structure**: Includes all fields from summary view PLUS:
+
+
+### Integration Service Tables
+
+#### partner_master (NEEDS REVIEW)
+**Purpose**: Store operational partner configuration
+**Key Fields**:
+- partner_id (PK): Unique identifier (e.g., "partner-a")
+- partner_name: Display name
+- enabled: Master kill switch (true/false)
+- webhook_url: Partner's webhook endpoint for events
+- webhook_auth_type: BEARER_TOKEN, BASIC_AUTH, API_KEY, NONE
+- webhook_auth_token: Encrypted auth token
+- webhook_timeout_seconds: Default 30
+- circuit_breaker_enabled: true/false
+- circuit_breaker_threshold: Default 10 consecutive failures
+- circuit_breaker_cooldown_minutes: Default 15
+- priority: HIGH, MEDIUM, LOW (affects retry behavior)
+- contact_email: Partner technical contact
+- Audit fields: created_at, created_by, updated_at, updated_by
+
+**Indexes**: partner_id (PK), enabled
+
+#### partner_config_audit (NEEDS REVIEW)
+**Purpose**: Track all configuration changes for audit trail
+**Key Fields**:
+- id (PK): Auto-increment
+- partner_id: Reference to partner_master
+- config_version: Version number from YAML file
+- changed_by: User who made change
+- changed_at: Timestamp
+- change_type: DOMAIN_ADDED, DOMAIN_REMOVED, WEBHOOK_CHANGED, ENABLED, DISABLED
+- previous_value: JSON snapshot before change
+- new_value: JSON snapshot after change
+- change_reason: Free text explanation
+- approved_by: Approver (if approval workflow exists)
+
+**Indexes**: (partner_id, changed_at)
+
+#### event_delivery_log (NEEDS REVIEW)
+**Purpose**: Log every webhook delivery attempt for observability
+**Key Fields**:
+- id (PK): Auto-increment
+- event_id: UUID from Core App (for correlation)
+- partner_id: Which partner
+- application_id: Which application
+- event_type: WORKFLOW_STATE_CHANGED
+- payload_size_bytes: Response size
+- attempt_number: 1, 2, 3, etc.
+- attempt_timestamp: When attempt was made
+- http_status_code: Response code from partner
+- response_body: Truncated response (first 1000 chars)
+- response_time_ms: Latency
+- delivery_status: SUCCESS, FAILED, RETRYING
+- error_message: Exception message if failed
+- next_retry_at: When to retry if failed
+
+**Indexes**: event_id, (partner_id, attempt_timestamp), (delivery_status, next_retry_at)
+
+
+
+#### partner_event_failures (NEEDS REVIEW)
+**Purpose**: Dead letter queue for events that failed all retries
+**Key Fields**:
+- id (PK): Auto-increment
+- event_id: UUID (unique)
+- partner_id: Which partner couldn't receive it
+- application_id: Which application
+- event_payload: Full JSON payload for replay
+- total_attempts: How many times we tried
+- first_attempt_at: When first tried
+- last_attempt_at: When last tried
+- failure_category: PARTNER_DOWN, PARTNER_REJECTED, NETWORK_ERROR, TIMEOUT
+- permanent_failure_reason: Why we gave up
+- status: PENDING_RETRY, PERMANENTLY_FAILED, MANUALLY_RESOLVED
+- resolved_at: When manually fixed
+- resolved_by: Who fixed it
+
+**Indexes**: (status, last_attempt_at), (partner_id, status)
+
+
+
+#### event_propagation_failures (In Core App Database) (NEEDS REVIEW)
+**Purpose**: Dead letter queue in Core App for events that couldn't reach Integration Service
+**Key Fields**:
+- id (PK): Auto-increment
+- event_id: UUID
+- application_id: Which application
+- event_type: WORKFLOW_STATE_CHANGED
+- event_payload: Full event data
+- failure_reason: Why REST call failed
+- http_status_code: If got response
+- retry_count: How many retries attempted
+- first_failed_at: When first failed
+- last_retry_at: When last retry attempted
+- status: PENDING_RETRY, PERMANENTLY_FAILED, RESOLVED
+- resolved_at: When successfully sent
+
+**Note**: This table is managed by Core App team, but Integration Service should be aware of it for end-to-end troubleshooting.
+
+---
+
+## 5. Component Design
+
+### Architecture Style: Modular Monolith
+
+The service is structured as a **modular monolith** - a single deployable application with clear module boundaries and separation of concerns. Each module owns its functionality and can potentially be extracted into a separate microservice in the future if needed.
+
+### Module Structure
+
+```
+data-integration-service/
+├── src/main/java/com/company/integration/
+│   ├── shared/                          # SHARED MODULE
+│   │   ├── domain/
+│   │   │   ├── entity/                  # JPA entities for views
+│   │   │   │   ├── ApplicationDataSummaryView.java
+│   │   │   │   ├── ApplicationDataDetailedView.java
+│   │   │   ├── dto/                     # Shared DTOs
+│   │   │   │   ├── ApplicationDataProjection.java
+│   │   │   │   ├── BaseInfoDTO.java
+│   │   │   │   ├── ContactPointsDTO.java
+│   │   │   │   ├── enums/
+│   │   │   │       ├── DomainType.java
+│   │   │   │       ├── ChannelType.java
+│   │   ├── repository/                  # View repositories
+│   │   │   ├── ApplicationDataSummaryViewRepository.java
+│   │   │   ├── ApplicationDataDetailedViewRepository.java
+│   │   ├── service/                     # Shared services
+│   │   │   ├── ProjectionService.java   # Used by all modules
+│   │   │   ├── ConfigurationService.java # Used by all modules
+│   │   ├── mapper/                      # MapStruct mappers
+│   │   │   ├── ApplicationDataMapper.java
+│   │   ├── config/                      # Shared configurations
+│   │   │   ├── DataSourceConfig.java
+│   │   │   ├── ThreadPoolConfig.java
+│   │
+│   ├── search/                          # SEARCH MODULE
+│   │   ├── controller/
+│   │   │   ├── SearchController.java
+│   │   ├── service/
+│   │   │   ├── SearchService.java
+│   │   │   ├── ElasticsearchSyncService.java
+│   │   ├── repository/
+│   │   │   ├── ApplicationSearchRepository.java  # ES repository
+│   │   ├── dto/
+│   │   │   ├── SearchRequest.java
+│   │   │   ├── SearchResponse.java
+│   │
+│   ├── bulk/                            # BULK MODULE
+│   │   ├── controller/
+│   │   │   ├── BulkIdsController.java
+│   │   │   ├── BulkDataController.java
+│   │   ├── service/
+│   │   │   ├── BulkService.java
+│   │   ├── dto/
+│   │   │   ├── IdAndTimestamp.java
+│   │   │   ├── BulkDataResponse.java
+│   │
+│   ├── events/                          # EVENTS MODULE
+│   │   ├── controller/
+│   │   │   ├── EventIngestionController.java
+│   │   ├── service/
+│   │   │   ├── EventProcessingService.java
+│   │   │   ├── EventPublishingService.java
+│   │   ├── repository/
+│   │   │   ├── EventDeliveryLogRepository.java
+│   │   │   ├── PartnerEventFailuresRepository.java
+│   │   ├── dto/
+│   │   │   ├── EventPropagationRequest.java
+│   │   │   ├── WorkflowStateChangedPayload.java
+│   │   ├── client/
+│   │   │   ├── PartnerWebhookClient.java
+│   │
+│   ├── admin/                           # ADMIN MODULE
+│   │   ├── controller/
+│   │   │   ├── AdminPartnerController.java
+│   │   │   ├── AdminFailuresController.java
+│   │   ├── service/
+│   │   │   ├── AdminService.java
+│   │   ├── dto/
+│   │   │   ├── PartnerStatusResponse.java
+│   │
+│   ├── configuration/                   # CONFIGURATION MODULE
+│   │   ├── repository/
+│   │   │   ├── PartnerMasterRepository.java
+│   │   │   ├── PartnerConfigAuditRepository.java
+│   │   ├── model/
+│   │   │   ├── PartnerMaster.java       # JPA entity
+│   │   │   ├── PartnerConfigAudit.java  # JPA entity
+│   │   │   ├── PartnerConfig.java       # YAML model
+│   │   ├── loader/
+│   │   │   ├── YamlConfigLoader.java
+│   │
+│   └── common/                          # COMMON MODULE
+│       ├── exception/
+│       │   ├── GlobalExceptionHandler.java
+│       │   ├── PartnerNotFoundException.java
+│       │   ├── RateLimitExceededException.java
+│       ├── security/
+│       │   ├── AuthenticationFilter.java
+│       ├── metrics/
+│       │   ├── MetricsConfiguration.java
+│       ├── util/
+│           ├── JsonUtils.java
+│           ├── ValidationUtils.java
+```
+
+### Module Dependency Rules
+
+**Dependency Flow** (modules can only depend on layers below):
+```
+┌─────────────────────────────────────────────┐
+│  API Modules (search, bulk, events, admin) │  ← Feature modules
+└──────────────────┬──────────────────────────┘
+                   ↓
+┌──────────────────▼──────────────────────────┐
+│  Shared Module (projection, configuration)  │  ← Business logic
+└──────────────────┬──────────────────────────┘
+                   ↓
+┌──────────────────▼──────────────────────────┐
+│  Common Module (exceptions, security, utils)│  ← Infrastructure
+└─────────────────────────────────────────────┘
+```
+
+**Allowed Dependencies**:
+- ✅ Search module → Shared module (uses ProjectionService)
+- ✅ Bulk module → Shared module (uses ProjectionService)
+- ✅ Events module → Shared module (uses ProjectionService, ConfigurationService)
+- ✅ All modules → Common module (exceptions, utilities)
+- ✅ Shared module → Common module
+
+**Forbidden Dependencies**:
+- ❌ Search module → Bulk module (modules are independent)
+- ❌ Bulk module → Events module (no cross-module dependencies)
+- ❌ Shared module → Any API module (shared is lower layer)
+- ❌ Common module → Any other module (common is lowest layer)
+
+### Module Characteristics
+
+**SHARED MODULE** (Core Business Logic):
+- **Purpose**: Reusable business logic used by all API modules
+- **Components**: ProjectionService, ConfigurationService, view repositories
+- **Owns**: Data projection logic, partner configuration management
+- **Independence**: Can be unit tested without any API module
+- **Future**: Could become a library if services split
+
+**SEARCH MODULE** (Search API Feature):
+- **Purpose**: Application search functionality
+- **API**: POST /api/v1/search
+- **Owns**: Elasticsearch integration, search query building
+- **Dependencies**: Shared (ProjectionService, ConfigurationService)
+- **Thread Pool**: Uses default Tomcat pool
+- **Future**: Could be extracted as Search Service
+
+**BULK MODULE** (Bulk Sync Feature):
+- **Purpose**: Batch data synchronization
+- **API**: GET /api/v1/bulk/ids, GET /api/v1/bulk/data
+- **Owns**: Bulk data retrieval, pagination logic
+- **Dependencies**: Shared (ProjectionService, ConfigurationService)
+- **Thread Pool**: Dedicated bulk executor (isolated)
+- **Future**: Could be extracted as Bulk Service
+
+**EVENTS MODULE** (Event Processing Feature):
+- **Purpose**: Real-time event distribution to partners AND AI agents
+- **API**: POST /api/v1/events/workflow-state-changed
+- **Owns**: Event ingestion, webhook delivery, retry logic, dead letter queue
+- **Consumers**: 
+  - Partner systems (push via webhooks, uses summary projection)
+  - AI agents (push via webhooks, uses detailed projection with descriptive fields)
+- **Dependencies**: Shared (ProjectionService, ConfigurationService)
+- **Thread Pools**: Event executor + webhook executor (isolated)
+- **Key Difference**: Partners get summary data (60% fields), AI agents get detailed data (100% fields including comments, descriptions, notes)
+- **Future**: Could be extracted as Event Service
+
+**ADMIN MODULE** (Operations Interface):
+- **Purpose**: Operational management and troubleshooting
+- **API**: POST /admin/partners/{id}/enable, /disable, /test, /retry
+- **Owns**: Partner management, failure investigation
+- **Dependencies**: Shared (ConfigurationService), Events (EventPublishingService for test)
+- **Thread Pool**: Uses default Tomcat pool
+- **Future**: Could be web UI instead of API
+
+**CONFIGURATION MODULE** (Partner Config Management):
+- **Purpose**: Partner configuration loading and management
+- **Owns**: YAML loading, database config, merging logic
+- **Dependencies**: Common (utilities)
+- **Used By**: Shared module (ConfigurationService)
+
+**COMMON MODULE** (Infrastructure):
+- **Purpose**: Cross-cutting concerns
+- **Owns**: Exception handling, security, metrics, utilities
+- **Dependencies**: None (lowest layer)
+- **Used By**: All modules
+
+### Benefits of Modular Monolith Design
+
+**1. Clear Boundaries**:
+- Each module has single responsibility
+- Easy to understand what each module does
+- New developers can focus on one module at a time
+
+**2. Independent Development**:
+- Teams can work on different modules in parallel
+- Search changes don't affect Bulk module
+- Events changes don't affect Search module
+
+**3. Testability**:
+- Unit test modules independently
+- Mock dependencies between modules
+- Integration test per module or end-to-end
+
+**4. Future Microservices Path**:
+- Each module is already isolated
+- Clear APIs between modules (service interfaces)
+- Can extract module to separate service if needed
+- Example: High event volume → Extract Events module as separate service
+
+**5. Deployment Simplicity**:
+- Single JAR to deploy (all modules together)
+- No distributed system complexity (yet)
+- Simple troubleshooting (single log file)
+- No network calls between modules (in-process)
+
+**6. Resource Sharing**:
+- Single database connection pool (all modules share)
+- Single Elasticsearch connection
+- Shared configuration and utilities
+- Lower operational overhead
+
+### When to Split Modules into Microservices
+
+Keep as modular monolith unless:
+
+**Volume-Based**:
+- Events: More events getting generated
+- Search: Search volume grows
+- Bulk: Daily volume impacts other APIs
+
+**Team-Based**:
+- Separate teams own Search vs Events
+- Different deployment schedules needed
+- Different technology requirements
+
+**Scaling-Based**:
+- Events needs 10 pods, Search needs 3 pods
+- Current: Scale entire monolith (waste resources)
+- After split: Scale each service independently
+
+**For 50 records/day workload**: Modular monolith is perfect. All modules in one service, clear boundaries, simple operations. (FIND THE RIGHT NUMBER FROM PROD DB)
+
+### Key Services (Shared Module)
+
+#### ProjectionService
+**Responsibility**: Build and filter data projections from database views
+
+**Key Methods**:
+- Build summary projection (single application)
+- Build detailed projection (single application)
+- Build summary projections in batch (for bulk API)
+- Filter projection based on partner configuration
+- Apply domain-level and field-level filtering
+
+**Data Sources**:
+- Queries: application_data_summary_view (primary)
+- Queries: application_data_detailed_view (AI Agent only)
+- Uses: MapStruct for view entity → DTO mapping
+- Caching: Consider caching frequently accessed applications (optional)
+
+**Key Logic**:
+- Load data from appropriate view based on channel (summary vs detailed)
+- Map view entity to ApplicationDataProjection DTO
+- Apply partner-specific domain filtering (set excluded domains to null)
+- Apply field-level exclusions if configured
+- Return unified structure (fixed JSON shape)
+
+#### ConfigurationService
+**Responsibility**: Manage partner configurations (merge YAML + database)
+
+**Key Methods**:
+- Get merged partner configuration by ID
+- Get channel-specific configuration (resolves overrides)
+- Check if partner is enabled (quick boolean check)
+- Get included domains for partner + channel
+- Refresh configuration from sources (cache invalidation)
+- Get all active partners (for event broadcasting)
+
+**Configuration Sources**:
+- YAML files: resources/partner-configs/{partnerId}.yaml (structural config)
+- Database: partner_master table (operational config)
+- Merge strategy: Database overrides YAML for operational fields (enabled, webhook_url, auth_token)
+- Caching: In-memory cache with 5-minute TTL, manual refresh endpoint
+
+**Configuration Resolution**:
+- Start with system defaults
+- Apply partner default configuration from YAML
+- Apply channel-specific overrides if present
+- Merge database operational settings
+- Result: Fully resolved configuration for partner + channel
+
+#### EventProcessingService
+**Responsibility**: Process workflow events from Core App
+
+**Key Methods**:
+- Process workflow state change event (main entry point, async)
+- Determine interested partners for event type
+- Build projection for each interested partner
+- Coordinate event publishing to partners
+
+**Processing Flow**:
+1. Receive event from Event Ingestion API
+2. Mark event as received (idempotency check)
+3. Query all partners with events enabled
+4. For each partner:
+   - Check if partner is enabled
+   - Check circuit breaker status
+   - Build projection from summary view
+   - Filter by partner configuration
+   - Queue for webhook delivery
+5. Return 202 Accepted to Core App (don't block)
+6. Process asynchronously
+
+**Error Handling**:
+- If projection fails: Log error, skip partner, continue with others
+- If all partners fail: Still return success to Core App (events stored for retry)
+- Idempotency: Track processed event_ids, ignore duplicates
+
+#### EventPublishingService
+**Responsibility**: Deliver events to partner webhooks with retry logic
+
+**Key Methods**:
+- Publish to partner webhook (with retries)
+- Check circuit breaker status
+- Open/close circuit breaker manually
+- Log delivery attempts
+- Handle failure scenarios
+
+**Delivery Flow**:
+1. Check if circuit breaker is open (skip if open)
+2. Build HTTP request (headers, auth, payload)
+3. Call partner webhook endpoint
+4. Log delivery attempt (success/failure)
+5. If success: Update metrics, done
+6. If failure:
+   - Determine if retriable (5xx, timeout) or not (4xx)
+   - If retriable: Schedule retry with exponential backoff
+   - If not retriable: Log as permanent failure, alert
+   - Update circuit breaker failure count
+   - If threshold reached: Open circuit
+
+**Retry Strategy**:
+- Immediate: 3 attempts with 5s, 10s, 20s backoff
+- Short-term: Every 15 minutes for 2 hours
+- Long-term: Every 1 hour for 24 hours
+- After 24 hours: Move to dead letter queue
+- Total: ~30 attempts over 24 hours
+
+**Circuit Breaker Logic**:
+- Closed (normal): Deliver events normally
+- Open (broken): Skip delivery, save to dead letter, don't attempt
+- Half-Open (testing): After cooldown, try 1 event
+  - If succeeds: Close circuit, resume normal delivery
+  - If fails: Open circuit again
+
+#### ElasticsearchSyncService
+**Responsibility**: Keep Elasticsearch index in sync with database
+
+**Key Methods**:
+- Scheduled incremental sync (every 5 minutes)
+- Full reindex (manual trigger)
+- Sync single application (called from event processing)
+
+**Sync Strategy**:
+- Track last sync timestamp
+- Query summary view for applications modified since last sync
+- Index only searchable fields (~20 fields) in Elasticsearch
+- Update last sync timestamp
+- Log sync statistics (records synced, errors, duration)
+
+**Indexed Fields** (subset of summary view):
+- Application metadata: id, reference_number, workflow_state, priority, created_date
+- Contact: primary_email, primary_phone, contact_person_name
+- Status fields: status, completion_status, assessment_status, review_status
+- Dates: submitted_date, completed_date, assessment_date, review_date
+- PLACEHOLDER: Final list to be determined based on search requirements
+
+**Error Handling**:
+- If single document fails: Log error, continue with others
+- If Elasticsearch is down: Skip sync, retry next cycle
+- Alert if sync fails 3 consecutive times
+
+### Data Access Layer
+
+**View Repositories**:
+- ApplicationDataSummaryViewRepository: Query summary view
+- ApplicationDataDetailedViewRepository: Query detailed view
+
+**Key Query Methods**:
+- Find by ID (single)
+- Find by IDs (batch, for bulk API)
+- Find IDs modified since timestamp (for bulk IDs API)
+- Find modified since timestamp (for ES sync)
+- Paginated queries (for bulk data API)
+
+**Configuration Repositories**:
+- PartnerMasterRepository: CRUD for partner_master
+- PartnerConfigAuditRepository: Write audit records
+- EventDeliveryLogRepository: Write delivery logs
+- PartnerEventFailuresRepository: Manage dead letter queue
+
+### External Integration Layer
+
+**REST Clients**:
+- Partner Webhook Client: Call partner endpoints
+  - Configure timeouts: connect 10s, read 30s
+  - Add retry logic via Spring Retry
+  - Add authentication headers per partner config
+  - Track response times and status codes
+
+**Elasticsearch Client**:
+- Spring Data Elasticsearch repository
+- Document indexing and querying
+- Health check and status monitoring
+
+---
+
+## 6. API Specifications
+
+### API Naming Convention
+- Base path: `/api/v1`
+- Versioning: URL-based (v1, v2, etc.)
+- Response format: JSON
+- Date format: ISO 8601 (yyyy-MM-dd'T'HH:mm:ss'Z')
+
+### Design Pattern: RESTful Manifest Pattern
+
+The Bulk API implements a **manifest-first pattern** (also known as a control file pattern in traditional batch systems) adapted for REST APIs:
+
+**Traditional Control File Approach:**
+1. Generate control file (contains record count, checksums, metadata)
+2. Generate data file (contains actual records)
+3. Partner downloads control file first
+4. Partner downloads data file
+5. Partner validates using control file metadata
+
+**Our RESTful Manifest Pattern:**
+1. IDs Endpoint = "Manifest" (contains totalElements, list of IDs)
+2. Data Endpoint = "Data retrieval" (contains actual records)
+3. Partner calls IDs endpoint first
+4. Partner calls Data endpoint for batches
+5. Partner validates using totalElements from manifest
+
+**Benefits of RESTful Approach:**
+- ✅ No file management (FTP, storage, cleanup)
+- ✅ Real-time data (not batch windows)
+- ✅ Partial sync recovery (retry specific IDs)
+- ✅ Standard HTTP error handling
+- ✅ API-based authentication (simpler than SFTP keys)
+- ✅ Flexible batching (partner controls batch size)
+
+**What We Provide (Like Control File Metadata):**
+- Total record count (`totalElements`)
+- Record identifiers with timestamps
+- Pagination information
+- Standard response structure
+
+**What Partner Does (Like Control File Validation):**
+- Compares expected count vs received count
+- Identifies missing records (if any)
+- Retries missing records
+- Maintains sync state (last sync timestamp)
+
+This pattern provides the reliability and completeness guarantees of traditional control files while leveraging modern REST API benefits.
+
+### 6.1 Event Ingestion API (Called by Core App)
+
+**POST /api/v1/events/workflow-state-changed**
+
+**Purpose**: Receive workflow state change events from Core App
+
+**Request Headers**:
+- Content-Type: application/json
+- Authorization: Bearer {token} (shared secret between Core App and Integration Service)
+
+**Request Body**:
+```
+{
+  "eventId": "uuid",
+  "applicationId": 12345, (primary key)
+  "eventType": "WORKFLOW_STATE_CHANGED",
+  "previousState": "SUBMITTED", (NOT NEEDED)
+  "newState": "APPROVED",(NOT NEEDED)
+  "triggeredBy": "user@example.com", (NOT NEEDED)
+  "timestamp": "2024-11-01T10:30:00Z",
+  "changeReason": "Approved by manager" (NOT NEEDED)
+}
+```
+
+**Response**: 202 Accepted (immediate acknowledgment)
+```
+{
+  "eventId": "uuid",
+  "status": "ACCEPTED",
+  "message": "Event queued for processing"
+}
+```
+
+**Error Responses**:
+- 400 Bad Request: Invalid payload
+- 401 Unauthorized: Invalid auth token
+- 500 Internal Server Error: Service issue
+
+**SLA**: Respond within 500ms, process asynchronously
+
+### 6.2 Search API (Called by Partners)
+
+**POST /api/v1/search**
+
+**Purpose**: Search applications by various criteria, return filtered data
+
+**Request Headers**:
+- Content-Type: application/json
+- Authorization: Bearer {partner_token}
+- X-Partner-ID: partner-a
+
+**Request Body** (~20 search parameters):
+```
+{
+  "referenceNumber": "APP-2024-001",
+  "status": ["SUBMITTED", "APPROVED"],
+  "priority": ["HIGH", "CRITICAL"],
+  "createdDateFrom": "2024-01-01",
+  "createdDateTo": "2024-12-31",
+  "workflowState": ["PENDING_REVIEW", "APPROVED"],
+  "applicationType": "TYPE_A",
+  "assessmentStatus": "COMPLETED",
+  "primaryEmail": "user@example.com",
+  "contactPersonName": "John Doe",
+  // ... additional search criteria
+  "page": 0,
+  "size": 50
+}
+```
+
+**Response**: 200 OK
+```
+{
+  "content": [
+    {
+      "applicationId": 12345,
+      "lastModified": "2024-11-01T10:30:00Z",
+      "workflowState": "APPROVED",
+      "baseInfo": {
+        "referenceNumber": "APP-2024-001",
+        "applicationType": "TYPE_A",
+        "status": "APPROVED",
+        // ... other baseInfo fields
+      },
+      "contactPoints": {
+        "primaryEmail": "user@example.com",
+        // ... other contactPoints fields
+      },
+      "questionnaire": null,  // Excluded for this partner
+      "assessment": {
+        // ... assessment summary fields
+      },
+      "meetings": {
+        // ... meetings summary
+      },
+      "issues": null,  // Excluded for this partner
+      "postCompletionReview": null  // Excluded for this partner
+    }
+  ],
+  "page": 0,
+  "size": 50,
+  "totalElements": 150,
+  "totalPages": 3
+}
+```
+
+**Response Notes**:
+- Fixed structure: All domain keys present
+- Excluded domains: Set to null based on partner configuration
+- Pagination: Standard Spring Data pagination format
+
+**Error Responses**:
+- 400 Bad Request: Invalid search criteria
+- 401 Unauthorized: Invalid partner token
+- 403 Forbidden: Partner not enabled or no search access
+- 429 Too Many Requests: Rate limit exceeded
+- 500 Internal Server Error
+
+
+
+### 6.3 Bulk API - IDs Endpoint
+
+**GET /api/v1/bulk/ids**
+
+**Purpose**: Get list of application IDs and timestamps modified since given time. This endpoint provides a "manifest" of available records that partners use to validate completeness of their sync.
+
+**Request Headers**:
+- Authorization: Bearer {partner_token}
+- X-Partner-ID: partner-a
+
+**Query Parameters**:
+- since: ISO 8601 timestamp (required)
+- page: Page number (default: 0)
+- size: Page size (default: 1000, max: 5000)
+
+**Example**: `/api/v1/bulk/ids?since=2024-11-01T00:00:00Z&page=0&size=1000`
+
+**Response**: 200 OK
+```
+{
+  "content": [
+    {
+      "applicationId": 12345,
+      "lastModified": "2024-11-01T10:30:00Z"
+    },
+    {
+      "applicationId": 12346,
+      "lastModified": "2024-11-01T11:45:00Z"
+    }
+    // ... up to 1000 records per page
+  ],
+  "page": 0,
+  "size": 1000,
+  "totalElements": 5000,  // ← CRITICAL: Total count for partner validation
+  "totalPages": 5
+}
+```
+
+**Partner Validation Pattern**:
+
+Partners use `totalElements` to validate sync completeness:
+
+1. **Fetch All IDs**: Call this endpoint for all pages to get complete list
+2. **Store Locally**: Save all IDs from manifest (5000 in this example)
+3. **Fetch Data**: Call Bulk Data API for batches of IDs
+4. **Validate Completeness**: 
+   - Count records stored in partner database
+   - Compare: `totalElements` (5000) vs records stored (should be 5000)
+   - If mismatch: Identify missing IDs (set difference) and retry
+5. **Recovery**: Re-fetch specific missing IDs via Bulk Data API
+
+**Implementation Note**:
+The `totalElements` field is automatically provided by Spring Data Pagination and represents the total count of records modified since the `since` timestamp. Partners should use this for reconciliation - it serves the same purpose as a "record count" in traditional control file patterns.
+
+**Why This Design**:
+- Simple manifest-first pattern (similar to control files)
+- Partners validate on their side (clear responsibility boundary)
+- Idempotent (can re-query manifest anytime)
+- Supports partial sync recovery (retry specific missing IDs)
+
+**Error Responses**:
+- 400 Bad Request: Invalid since parameter
+- 401 Unauthorized: Invalid partner token
+- 403 Forbidden: Partner not enabled or no bulk access
+- 429 Too Many Requests: Rate limit exceeded (max 1 concurrent request per partner)
+
+
+
+### 6.4 Bulk API - Data Endpoint
+
+**GET /api/v1/bulk/data**
+
+**Purpose**: Get full application data for specified IDs (paginated). Partners call this after retrieving IDs from the IDs endpoint.
+
+**Request Headers**:
+- Authorization: Bearer {partner_token}
+- X-Partner-ID: partner-a
+
+**Query Parameters**:
+- ids: Comma-separated list of application IDs (required, max 1000 per request)
+- page: Page number (default: 0)
+- size: Page size (default: 100, max: 1000)
+
+**Example**: `/api/v1/bulk/data?ids=12345,12346,12347&page=0&size=100`
+
+**Response**: 200 OK (same structure as Search API response)
+```
+{
+  "content": [
+    {
+      "applicationId": 12345,
+      "lastModified": "2024-11-01T10:30:00Z",
+      "workflowState": "APPROVED",
+      "baseInfo": { ... },
+      "contactPoints": { ... },
+      "questionnaire": null,  // Excluded for this partner
+      "assessment": { ... },
+      "meetings": { ... },
+      "issues": null,  // Excluded for this partner
+      "postCompletionReview": null  // Excluded for this partner
+    }
+    // ... more records
+  ],
+  "page": 0,
+  "size": 100,
+  "totalElements": 1000,
+  "totalPages": 10
+}
+```
+
+**Response Notes**:
+- Fixed structure: All domain keys present
+- Excluded domains: Set to null based on partner configuration
+- Pagination: Standard Spring Data pagination format
+- Same projection filtering as Search API (per partner config)
+
+**Typical Usage Pattern**:
+```
+1. Partner calls /bulk/ids → Gets 5000 IDs (manifest)
+2. Partner batches IDs into groups of 100-500
+3. For each batch: Call /bulk/data?ids={batch}
+4. Store received data in partner database
+5. After all batches: Validate count (5000 expected vs stored)
+```
+
+**Performance Considerations**:
+- Recommend 100-500 IDs per request (balance between API calls and response size)
+- Don't send all 5000 IDs in one request (timeout risk, large payload)
+- Process batches sequentially or with limited parallelism (respect rate limits)
+
+**Error Responses**:
+- 400 Bad Request: No IDs provided or too many IDs (>1000)
+- 401 Unauthorized: Invalid partner token
+- 403 Forbidden: Partner not enabled or no bulk access
+- 429 Too Many Requests: Rate limit exceeded (max 2 concurrent requests per partner)
+- 503 Service Unavailable: Circuit breaker open (bulk service overloaded)
+
+
+**Rate Limiting**:
+- Per partner: Max 2 concurrent requests
+- Global: Max 10 concurrent requests
+- If limit exceeded: Return 429 with Retry-After header
+
+**Reconciliation Note**:
+Partners should track which IDs they've successfully fetched and stored. If sync is interrupted, partners can resume by requesting only the remaining IDs from their manifest, not re-fetching the entire dataset.
+
+### 6.5 AI Agent API
+
+**POST /api/v1/ai-agent/analyze**
+
+**Purpose**: Provide detailed application data to AI agent for analysis
+
+**Key Differences from Other APIs**:
+- Uses detailed_view (100% of fields)
+- Includes all descriptive fields (comments, notes, descriptions)
+- No domain filtering (AI gets everything)
+- Internal use only (different authentication)
+
+**PLACEHOLDER**: Detailed specification to be provided when AI Agent integration begins
+
+### 6.6 Admin API (Internal)
+
+**Purpose**: Operations team management interface
+
+**MVP Endpoints** (MUST HAVE for first release):
+
+**POST /api/v1/admin/partners/{partnerId}/enable**
+- Enable partner (set enabled = true)
+- Critical for partner activation
+
+**POST /api/v1/admin/partners/{partnerId}/disable**
+- Disable partner (set enabled = false)
+- Critical for incident response
+
+**POST /api/v1/admin/partners/{partnerId}/test**
+- Send test event to partner webhook
+- Critical for partner onboarding and troubleshooting
+
+**GET /api/v1/admin/partners/{partnerId}/failures**
+- Get dead letter queue events for partner
+- Filter by status, date range
+- Critical for operations
+
+**POST /api/v1/admin/partners/{partnerId}/failures/{eventId}/retry**
+- Manually retry failed event
+- Critical for recovery
+
+**Phase 2 Endpoints** (POST-MVP, add based on operational needs):
+
+**GET /api/v1/admin/partners**
+- List all partners with status and metrics
+
+**GET /api/v1/admin/partners/{partnerId}**
+- Get detailed partner configuration and health metrics
+
+**PUT /api/v1/admin/partners/{partnerId}**
+- Update partner configuration (database fields only)
+
+**GET /api/v1/admin/partners/{partnerId}/audit**
+- Get configuration change history
+
+**POST /api/v1/admin/elasticsearch/reindex**
+- Trigger manual full reindex
+
+**Authentication**: Internal admin token or OAuth2
+
+**MVP Scope Rationale**:
+Focus on critical operational needs first. For 2-3 partners, many management operations can be done via database queries initially. Add UI and additional endpoints based on actual operational pain points, not anticipated needs.
+
+---
+
+## 7. Configuration Management
+
+### Configuration Architecture
+
+**Two-Tier Configuration**:
+1. **Structural Configuration** (YAML files): Domain selections, channel configs, business rules
+2. **Operational Configuration** (Database): Webhook URLs, auth tokens, enabled status
+
+**Why Hybrid?**:
+- YAML: Version controlled, reviewed via PR, clear audit via Git
+- Database: Quick operational changes (enable/disable, update webhook) without deployment
+
+### YAML Configuration Files
+
+**Location**: `src/main/resources/partner-configs/{partnerId}.yaml`
+
+**File Structure**:
+```
+partnerId: partner-a
+version: "1.2"
+effectiveFrom: "2024-11-01"
+
+metadata:
+  description: "Partner A - Financial Services Company"
+  technicalContact: "api-team@partnera.com"
+  businessContact: "integration@partnera.com"
+  onboardedDate: "2023-06-01"
+
+# Which consumption channels enabled
+channels:
+  search:
+    enabled: true
+  bulk:
+    enabled: true
+  events:
+    enabled: true
+
+# Default domain configuration (applies to all channels unless overridden)
+domainConfig:
+  mode: "INCLUDE"  # INCLUDE (whitelist) or EXCLUDE (blacklist)
+  includedDomains:
+    - BASE_INFO
+    - CONTACT_POINTS
+    - ASSESSMENT
+    - MEETINGS
+
+  # Optional: Field-level exclusions
+  fieldExclusions:
+    BASE_INFO:
+      - internal_notes
+      - legacy_system_id
+    ASSESSMENT:
+      - assessor_internal_comments
+
+# Channel-specific overrides (optional)
+channelOverrides:
+  events:
+    domainConfig:
+      includedDomains:
+        - BASE_INFO
+        - CONTACT_POINTS
+      notes: "Events only need minimal data"
+  
+  bulk:
+    domainConfig:
+      includedDomains:
+        - BASE_INFO
+        - CONTACT_POINTS
+        - ASSESSMENT
+        - MEETINGS
+        - ISSUES
+
+# Delivery settings for events
+delivery:
+  retryPolicy:
+    maxAttempts: 20
+    backoffStrategy: "EXPONENTIAL"
+    maxBackoffSeconds: 3600
+  timeout:
+    connectTimeoutSeconds: 10
+    readTimeoutSeconds: 30
+  circuitBreaker:
+    enabled: true
+    failureThreshold: 10
+    cooldownMinutes: 15
+
+# Rate limiting
+rateLimits:
+  search:
+    requestsPerMinute: 30
+  bulk:
+    requestsPerMinute: 5
+  events:
+    maxConcurrentWebhooks: 3
+```
+
+**PLACEHOLDER Fields**:
+- Domain names: Update with actual domain names from your application
+- Field names: Update with actual field names for exclusions
+- Add custom sections as needed per partner
+
+### Database Configuration
+
+**partner_master table** stores:
+- partner_id (must match YAML filename)
+- partner_name (display name)
+- enabled (true/false - master switch)
+- webhook_url
+- webhook_auth_type
+- webhook_auth_token (encrypted)
+- webhook_timeout_seconds
+- circuit_breaker_enabled
+- circuit_breaker_threshold
+- circuit_breaker_cooldown_minutes
+- priority (HIGH, MEDIUM, LOW)
+- contact_email
+
+### Configuration Loading Process
+
+**Startup**:
+1. Load all YAML files from resources/partner-configs/
+2. Validate each YAML against schema
+3. Load all partner_master records from database
+4. Merge: Database operational fields override YAML
+5. Cache merged configurations in memory
+6. Validate merged configs (domains exist, channels valid, etc.)
+7. Log any validation errors
+
+**Runtime**:
+- In-memory cache with 5-minute TTL
+- Manual refresh endpoint: POST /api/v1/admin/config/refresh
+- On database change: Automatic refresh via scheduled job (every 5 minutes)
+- Configuration accessed via ConfigurationService
+
+**Precedence Rules**:
+1. Channel-specific override (if defined) - most specific
+2. Partner-level default configuration
+3. System-level defaults (in application.yaml)
+
+### Configuration Validation
+
+**YAML Validation Rules**:
+- partnerId must match filename
+- All referenced domains must exist in system
+- All referenced fields must exist in respective domains
+- Webhook URL must be valid format (if events enabled)
+- Rate limits must be positive numbers
+- Channel overrides can only reference enabled channels
+- effectiveFrom date must be valid
+
+**Runtime Validation**:
+- Before processing request: Check partner enabled
+- Before event delivery: Check circuit breaker status
+- Before API call: Check rate limits not exceeded
+- Log validation failures with details
+
+**Health Checks** (Scheduled Job - Every Hour):
+- Verify all partner webhook URLs are reachable (HEAD request)
+- Verify all referenced domains still exist
+- Verify no orphaned configurations
+- Alert on validation failures
+
+### Configuration Change Process
+
+**For Major Changes** (Domain selections, channel enablement):
+1. Developer creates new branch
+2. Edit partner YAML file
+3. Increment version number in file
+4. Update effectiveFrom date
+5. Document changes in PR description
+6. Create PR for review
+7. Tech lead reviews and approves
+8. Merge to main branch
+9. Deploy application
+10. Configuration automatically loaded on startup
+
+**For Operational Changes** (Webhook URL, enable/disable):
+1. Operations team logs into admin dashboard
+2. Edit partner via UI (updates database directly)
+3. System creates audit record automatically
+4. Configuration refreshes within 5 minutes (or immediately via refresh endpoint)
+5. No deployment needed
+
+
+
+## 8. Error Handling Strategy
+
+### Error Categories & Handling
+
+**Layer 1: Core App → Integration Service**
+
+**Error Scenarios**:
+- Integration Service is down (connection refused)
+- Integration Service is slow (timeout)
+- Integration Service returns 500
+- Network issues
+
+**Handling in Core App**:
+- Immediate retry: 3 attempts with exponential backoff (2s, 4s, 8s)
+- Total time: ~14 seconds maximum
+- If all retries fail: Store in event_propagation_failures table
+- Async listener ensures workflow is not blocked
+- Scheduled job retries from dead letter every 15 minutes
+- After 24 hours or 10 attempts: Mark as PERMANENTLY_FAILED
+- Alert if failures > 10 in 1 hour (indicates Integration Service down)
+
+**Recovery**:
+- Automatic: Scheduled retry job
+- Manual: Admin dashboard to replay failed events
+- Monitoring: Track dead letter queue size
+
+**Layer 2: Integration Service → Partner Webhooks**
+
+**Error Scenarios**:
+- Partner webhook is down (5xx, connection refused, timeout)
+- Partner rejects payload (4xx)
+- Partner authentication fails (401)
+- Partner rate limits us (429)
+
+**Retriable Errors** (Network, 5xx, Timeouts, 429):
+- Immediate: 3 attempts with 5s, 10s, 20s backoff
+- Short-term: Every 15 minutes for 2 hours
+- Long-term: Every 1 hour for 24 hours
+- Total: ~30 attempts over 24 hours
+
+**Non-Retriable Errors** (4xx except 429):
+- 400 Bad Request: Log error, alert team (payload issue), don't retry
+- 401 Unauthorized: Alert immediately (auth token invalid), open circuit, don't retry
+- 404 Not Found: Alert (webhook URL wrong), open circuit, don't retry
+- 403 Forbidden: Alert (permission issue), don't retry
+
+**Circuit Breaker Logic**:
+- Track consecutive failures per partner
+- Threshold: 10 consecutive failures
+- Action: Open circuit for 15 minutes
+- Effect: Stop attempting deliveries, save all events to dead letter
+- After cooldown: Try 1 event (half-open state)
+  - Success: Close circuit, resume normal delivery
+  - Failure: Open circuit for another 15 minutes
+
+**Dead Letter Queue Management**:
+- Store in partner_event_failures table
+- Include full payload for replay
+- Track failure category and reason
+- Retention: Keep until manually resolved or 30 days
+- Manual replay: Admin dashboard with filters and bulk actions
+
+### Error Notification Strategy
+
+**Critical Alerts** 
+- Integration Service is down (5+ consecutive failures from Core App in 5 minutes)
+- Partner authentication failure (401 from any partner)
+- Systematic failures (50+ events failed to ANY partner in 1 hour)
+- Core App dead letter growing rapidly (100+ events in 1 hour)
+
+**Warning Alerts** 
+- Single partner issues (10+ failures to specific partner in 1 hour)
+- Slow partner performance (response time > 10 seconds)
+- Unprocessed dead letters older than 1 hour
+- Circuit breaker opened for partner
+
+**Daily Reports** (Email Summary):
+- Total events processed
+- Successful deliveries by partner
+- Failed deliveries by partner
+- Average delivery time per partner
+- Dead letter queue sizes
+- Top error messages
+
+### Error Metadata Capture
+
+**For Core App → Integration Service Failures**:
+- Event ID, Application ID, Event type, Timestamp
+- Full event payload
+- HTTP status code (if received)
+- Response body (if any)
+- Exception stack trace
+- Network error details
+- Core App server hostname
+- Retry attempt number
+
+**For Integration Service → Partner Failures**:
+- All above, plus:
+- Partner ID
+- Partner webhook URL
+- Request headers sent (excluding auth tokens)
+- Response headers received
+- Response body (first 1000 characters)
+- Which domains were included
+- Payload size in bytes
+- Integration Service instance ID
+- Circuit breaker state before/after
+
+### Error Prevention Strategies
+
+**Payload Validation**:
+- Validate payload against JSON schema before sending
+- Check all required fields present
+- Check field types match expected
+- If validation fails: Log as bug, alert team, don't send
+
+**Partner Health Checks**:
+- Scheduled job every 5 minutes
+- Send test event (special event type partners should ignore)
+- Monitor: Is webhook reachable? Auth working? Response time acceptable?
+- Pre-emptively open circuit breaker if health check fails
+
+**Contract Testing**:
+- During partner onboarding
+- Share JSON schema with partner
+- Send sample payloads to partner test environment
+- Partner confirms they can parse correctly
+- Document agreed-upon structure
+
+**Graceful Degradation**:
+- If Integration Service is struggling (high load):
+  - Prioritize high-priority partners
+  - Queue low-priority events for later processing
+  - Reduce retry frequency
+  - Alert operations team
+  - Don't fail workflow in Core App
+
+### Error Handling Decision Matrix
+
+| Error Scenario | Immediate Action | Retry Strategy | Alert Level | Resolution Owner |
+|----------------|------------------|----------------|-------------|------------------|
+| Integration Service down | Dead letter in Core App | Auto-retry 15min | Critical | DevOps |
+| Integration Service slow (timeout) | Retry with backoff | 3 attempts | Warning | DevOps |
+| Partner webhook down | Dead letter in Integration Service | Exponential 24hr | Warning | Partner + Ops |
+| Partner returns 401 | Open circuit, don't retry | None | Critical | Ops (check credentials) |
+| Partner returns 400 | Log and alert | None | Critical | Dev (payload issue) |
+| Partner returns 500 | Retry with backoff | Exponential 24hr | Info (if occasional) | Partner |
+| Partner timeout | Retry with backoff | Exponential 24hr | Warning (if frequent) | Partner + Ops |
+| Payload validation fails | Log, alert, don't send | None | Critical | Dev (bug in code) |
+| Elasticsearch sync fails | Log and retry | Next sync cycle | Warning | DevOps |
+
+---
+
+## 9. Performance & Isolation
+
+### Performance Requirements
+
+**API Response Time SLAs**:
+- Search API: P50 < 100ms, P95 < 500ms, P99 < 1s
+- Bulk IDs API: P50 < 1s, P95 < 2s
+- Bulk Data API: P50 < 5s, P95 < 10s (per 1000 records)
+- Event Processing: P50 < 200ms, P95 < 5min, P99 < 10min (end-to-end)
+
+**Resource Utilization Targets**:
+- Thread Pools: Normal < 50%, Peak < 80%, Alert > 90% for 5 minutes
+- Connection Pools: Normal < 60%, Peak < 80%, Alert > 90% for 5 minutes
+- CPU: Normal < 50%, Peak < 70%, Alert > 85% for 5 minutes
+- Memory (Heap): Normal < 60%, Peak < 75%, Alert > 85%
+
+### Thread Pool Isolation Strategy
+
+**Why Needed**: Bulk API operations (though infrequent) should not block Search API or Event processing
+
+**Thread Pool Configuration**:
+
+**Default Thread Pool** (Tomcat):
+- Size: 200 threads
+- Handles: Search API, Event Ingestion API, Admin API
+- Purpose: Quick operations, low latency
+
+**Bulk Thread Pool** (Dedicated):
+- Core threads: 5
+- Max threads: 10
+- Queue capacity: 10
+- Thread name prefix: "bulk-"
+- Handles: Bulk API only (both IDs and Data endpoints)
+- Purpose: Isolate potentially long-running bulk operations
+
+**Event Processing Thread Pool** (Dedicated):
+- Core threads: 10
+- Max threads: 20
+- Queue capacity: 100
+- Thread name prefix: "event-"
+- Handles: Async event processing after ingestion
+- Purpose: Dedicated capacity for event processing
+
+**Webhook Delivery Thread Pool** (Dedicated):
+- Core threads: 15
+- Max threads: 30
+- Queue capacity: 200
+- Thread name prefix: "webhook-"
+- Handles: Partner webhook calls
+- Purpose: I/O bound operations, many concurrent requests
+
+**Benefits**:
+- Bulk operations can't exhaust all threads
+- Search API always has threads available
+- Events processing not blocked by bulk
+- Clear separation of concerns
+
+### Connection Pool Strategy
+
+**Single Shared Connection Pool** (ONLY APPROACH):
+- Maximum pool size: 30 connections
+- Minimum idle: 10 connections
+- Connection timeout: 10 seconds
+- Idle timeout: 10 minutes
+- Max lifetime: 30 minutes
+- Leak detection threshold: 60 seconds
+
+**Why Single Pool is the Right Choice**:
+- Same database, same service = single pool is natural design
+- Thread pool isolation already provides workload separation
+- Bulk limited to 10 threads = max 10 connections used simultaneously
+- Search/Events have 20+ connections always available
+- Simple architecture, easy to maintain and debug
+
+**IMPORTANT - Do NOT Use Multiple Connection Pools**:
+Multiple connection pools pointing to the same database adds massive complexity:
+- Requires separate EntityManager configurations
+- Creates transaction management nightmares
+- Cannot share entities across pools
+- Difficult to debug which pool is being used
+- No practical benefit when thread isolation already works
+
+**Future Scaling**:
+- Need more capacity? Increase pool size (30 → 50 → 100)
+- Need isolation? Already have it via thread pools
+- True separate pools only make sense for: read replicas, different databases, or microservices
+
+### Rate Limiting
+
+**Purpose**: Prevent resource exhaustion and ensure fair usage
+
+**Bulk API Rate Limits**:
+- Per partner: Max 1 concurrent request
+- Global: Max 10 concurrent requests
+- Enforcement: Semaphore-based counting
+- Response if exceeded: 429 Too Many Requests with Retry-After header
+
+**Search API Rate Limits**:
+- Per partner: 60 requests/minute
+- Global: 200 requests/minute
+- Enforcement: Token bucket (Guava RateLimiter)
+- Response if exceeded: 429 Too Many Requests
+
+**Event Ingestion Rate Limits**:
+- Global: 100 events/minute
+- Per application: 10 events/minute (prevent loops)
+- Enforcement: Token bucket
+- Response if exceeded: 429 (Core App should back off)
+
+**Webhook Delivery Concurrency**:
+- Per partner: Max 3 concurrent webhooks
+- Global: Max 50 concurrent webhooks
+- Enforcement: Semaphore per partner
+- If exceeded: Queue for later delivery
+
+### Query Optimization
+
+**Database View Queries**:
+- Ensure indexes exist on key columns
+- Use batch fetching for bulk operations (IN clause with up to 1000 IDs)
+- Consider pagination cursor strategy instead of offset (better performance at high page numbers)
+
+**Elasticsearch Queries**:
+- Index only searchable fields (~20 fields, not all 500)
+- Use appropriate analyzers for text fields
+- Implement query result caching
+- Monitor slow queries and optimize
+
+**Projection Mapping**:
+- Use MapStruct for efficient DTO mapping
+- Avoid reflection-based mapping in hot paths
+- Consider caching frequently accessed projections (optional, measure first)
+
+### Performance Monitoring
+
+**Key Metrics to Track**:
+- API response times (histogram per endpoint)
+- Thread pool utilization (gauge per pool)
+- Connection pool utilization (gauge)
+- Database query duration (histogram per query type)
+- Partner webhook response times (histogram per partner)
+- Event processing duration (histogram)
+- Circuit breaker state (gauge per partner)
+- Rate limit hits (counter per partner and endpoint)
+- JVM metrics (heap, GC pauses, CPU)
+
+**Dashboard Visualization**:
+- Real-time metrics (last 1 hour)
+- Per-API performance trends
+- Per-partner webhook performance
+- Resource utilization graphs
+- Alert history
+
+---
+
+## 10. Security
+
+### Authentication & Authorization
+
+**Partner Authentication**:
+- Mechanism: Bearer Token (JWT or opaque token)
+- Header: Authorization: Bearer {token}
+- Partner identification: X-Partner-ID header (validated against token)
+- Token storage: Encrypted in database
+- Token rotation: Support token refresh without downtime
+
+**Core App Authentication**:
+- Mechanism: Shared secret or mutual TLS
+- Purpose: Secure event ingestion endpoint
+- Rotation: Coordinate with Core App team
+
+**Admin API Authentication**:
+- Mechanism: OAuth2 or internal SSO
+- Purpose: Protect configuration and operational endpoints
+- Roles: admin (full access), operator (read-only + limited actions)
+
+### Partner Webhook Security
+
+**Outbound Authentication**:
+- Support multiple auth types: Bearer Token, Basic Auth, API Key, Custom Headers
+- Store credentials encrypted (use Spring encryption or external vault)
+- Per-partner configuration
+
+**Request Signing** (Optional, Future):
+- HMAC-SHA256 signature of payload
+- Partner validates signature to ensure authenticity
+- Include signature in custom header: X-Signature
+
+**IP Whitelisting** (Optional, per partner):
+- Partner provides allowed IP ranges for inbound API calls
+- Enforce at API Gateway or application level
+- Store in partner configuration
+
+
+### Security Best Practices
+
+**Input Validation**:
+- Validate all API request payloads against schema
+- Sanitize inputs to prevent injection attacks
+- Limit request payload sizes (e.g., 1MB max)
+
+**Dependency Management**:
+- Keep all dependencies up to date
+- Regular security scanning (Dependabot, Snyk)
+- Apply security patches promptly
+
+**Secrets Management**:
+- Never commit secrets to version control
+- Use environment variables or secrets manager
+- Rotate secrets periodically
+
+**Logging**:
+- Never log sensitive data (passwords, tokens)
+- Mask sensitive fields in logs
+- Log all authentication failures for monitoring
+
+---
+
+## 11. Monitoring & Observability
+
+### Logging Strategy
+
+**Log Levels**:
+- ERROR: System errors, unhandled exceptions, critical failures
+- WARN: Recoverable errors, retry attempts, circuit breaker events
+- INFO: Business events (event processed, webhook delivered), startup/shutdown
+- DEBUG: Detailed flow, request/response bodies (non-production only)
+
+**Structured Logging**:
+- Use JSON format for log entries
+- Include: timestamp, level, service, component, message
+- Add context: partnerId, applicationId, eventId, correlationId
+- Tool: Logback with JSON encoder
+
+**Key Log Events**:
+- Event received from Core App
+- Event processing started/completed
+- Webhook delivery attempted/succeeded/failed
+- Circuit breaker state changes
+- Configuration changes
+- API requests (with response time)
+- Errors with full context
+
+**Log Aggregation**:
+- Send logs to centralized system (ELK, Splunk, CloudWatch)
+- Enable log search and analysis
+- Set up log-based alerts
+
+### Metrics Collection
+
+**MVP Metrics** (Core 4 - MUST HAVE):
+
+These metrics tell you if the system is healthy and functioning:
+
+**1. Request Duration & Count** (Automatic from Spring Boot Actuator)
+- Enabled by default with @Timed or Actuator
+- Tracks: request count, latency (P50, P95, P99)
+- Per endpoint automatically
+
+**2. Event Processing Success/Failure**
+- Counter: events.processed (labeled by status: success/failure)
+- Tells you: Are events being processed? What's the success rate?
+
+**3. Webhook Delivery Success/Failure per Partner**
+- Counter: webhook.delivery (labeled by partner_id, status)
+- Tells you: Which partners are receiving data successfully?
+
+**4. Dead Letter Queue Size**
+- Gauge: dead_letter.size (labeled by partner_id)
+- Tells you: Are failures accumulating? Which partner has issues?
+
+**Implementation Simplicity**:
+- Use Micrometer (included in Spring Boot)
+- Inject MeterRegistry into services
+- Create counters/gauges where events happen
+- Export via /actuator/prometheus
+- Total implementation: ~50 lines of code
+
+**Phase 2 Metrics** (POST-MVP, add if needed):
+- Thread pool utilization per pool
+- Connection pool utilization
+- Circuit breaker state per partner
+- Elasticsearch sync lag
+- Rate limit exceeded count
+- API request count by partner
+
+**Why Prioritize**:
+The core 4 metrics answer the critical questions:
+- Is the system processing events? (metric 2)
+- Are partners receiving data? (metric 3)
+- Are there failures piling up? (metric 4)
+- How fast are APIs responding? (metric 1)
+
+Additional metrics add operational insight but aren't critical for MVP. Add them incrementally based on actual monitoring needs, not theoretical completeness.
+
+### Health Checks
+
+**Spring Boot Actuator Endpoints**:
+- /actuator/health: Overall health status
+- /actuator/health/db: Database connectivity
+- /actuator/health/elasticsearch: Elasticsearch connectivity
+- /actuator/metrics: All metrics
+- /actuator/prometheus: Prometheus-formatted metrics
+
+**Custom Health Indicators**:
+- Partner webhook health (based on recent success rate)
+- Dead letter queue size (unhealthy if > threshold)
+- Circuit breaker status (info only, not failure)
+- Configuration validation (unhealthy if invalid configs)
+
+### Distributed Tracing (NOT NEEDED)
+
+**Implementation**:
+- Use Spring Cloud Sleuth or OpenTelemetry
+- Generate trace IDs for request correlation
+- Propagate trace context to partner webhooks
+- Store traces in Jaeger or Zipkin
+
+**Trace Key Points**:
+- Event ingestion → processing → webhook delivery
+- Search API → Elasticsearch → database → response
+- Bulk API → database pagination → streaming response
+
+### Alerting Rules
+
+**Critical Alerts**:
+- Integration Service down (health check fails)
+- Database connection pool exhausted
+- Dead letter queue size > 100
+- Multiple partner circuit breakers open simultaneously
+- Event processing latency > 10 minutes (P95)
+
+**Warning Alerts**:
+- Single partner circuit breaker open
+- Partner webhook success rate < 95%
+- Search API P95 latency > 1 second
+- Thread pool utilization > 80%
+- Elasticsearch sync lag > 15 minutes
+
+**Informational Alerts**:
+- New partner onboarded
+- Configuration changed
+- Manual dead letter replay executed
+
+### Dashboards
+
+**Operations Dashboard**:
+- Service health overview
+- Request rates by API
+- Error rates by API
+- Response time trends
+- Resource utilization (CPU, memory, threads, connections)
+
+**Partner Dashboard**:
+- Per-partner webhook success rate
+- Per-partner average response time
+- Per-partner failed events count
+- Circuit breaker status per partner
+- Events delivered per partner (daily)
+
+**Business Dashboard**:
+- Total events processed (daily, weekly, monthly)
+- Total API calls by partner
+- Data volume shared (by partner, by domain)
+- Partner onboarding timeline
+
+---
+
+## 12. Testing Strategy
+
+### Unit Testing
+
+**Coverage Target**: 80% code coverage
+
+**Key Areas**:
+- ProjectionService: Projection building and filtering logic
+- ConfigurationService: Configuration loading and merging
+- EventProcessingService: Event routing and processing logic
+- EventPublishingService: Webhook delivery and retry logic
+- All utility classes and helpers
+
+**Mocking Strategy**:
+- Mock repositories (use Mockito)
+- Mock REST clients (WireMock for partner webhooks)
+- Mock Elasticsearch client
+- Use test fixtures for common data
+
+### Integration Testing
+
+**Database Integration Tests**:
+TBD
+
+**Elasticsearch Integration Tests**:
+TBD
+
+**API Integration Tests**:
+- Use Spring Boot Test with @SpringBootTest
+- Test all API endpoints end-to-end
+- Test authentication and authorization
+- Test error responses
+- Test rate limiting
+
+### Contract Testing
+
+**Partner Webhook Contracts**:
+- Define expected request format (JSON schema)
+- Define expected response codes
+- Use Pact or Spring Cloud Contract
+- Share contracts with partners during onboarding
+- Verify Integration Service produces correct format
+- Partners verify they can consume format
+
+### Load Testing
+
+**Search API Load Test**:
+- Simulate 100 concurrent users
+- 1000 requests/minute for 10 minutes
+- Verify P95 < 500ms
+- Verify no errors or timeouts
+
+**Bulk API Load Test**:
+- Simulate 3 partners calling bulk simultaneously
+- 1000 records per request
+- Verify isolation (Search API unaffected)
+- Verify response times within SLA
+
+**Event Processing Load Test**:
+- Simulate 100 events/minute
+- 5 partners configured
+- Verify all events delivered within 5 minutes
+- Verify no dead letters (except expected failures)
+
+**Chaos Testing**:
+- Kill Integration Service during event processing
+- Verify events in Core App dead letter
+- Verify auto-recovery when service restarts
+- Simulate partner webhook down
+- Verify circuit breaker opens and dead letter works
+- Simulate database slow queries
+- Verify timeout handling and circuit breakers
+
+### Testing Environments
+
+**Local Development**:
+- Developers run service locally
+- Mock partner webhooks (WireMock)
+- Mock Core App event source
+
+**Integration Environment**:
+- Full stack deployed
+- Shared database (test data)
+- Real Elasticsearch instance
+- Mock partner webhooks or dedicated test endpoints
+- Connected to Core App test environment
+
+**Staging Environment**:
+- Production-like setup
+- Separate database with production-like data volume
+- Real Elasticsearch cluster
+- Test partner webhooks (partners provide test endpoints)
+- Connected to Core App staging
+
+**Production**:
+- Real partners
+- Real data
+- Comprehensive monitoring and alerting
+
+---
+
+## 13. Development Tasks
+
+### Phase 1: Foundation & Shared Module 
+
+**Task 1.1: Project Setup**
+- Initialize Spring Boot project with dependencies (including Resilience4j)
+- Set up Maven build with module organization
+- Create package structure for all modules (shared, search, bulk, events, admin, configuration, common)
+- Configure application.yaml with placeholders
+- Set up logging configuration (Logback with JSON encoder)
+- Set up Actuator endpoints
+- Create README with setup instructions and module documentation
+
+**Task 1.2: Common Module**
+- Create exception classes (PartnerNotFoundException, RateLimitExceededException, etc.)
+- Implement GlobalExceptionHandler with @ControllerAdvice
+- Create utility classes (JsonUtils, ValidationUtils)
+- Set up security filter/interceptor skeleton
+- Create base metric configuration
+- Write unit tests for utilities
+
+**Task 1.3: Database Setup**
+- Coordinate with Core App team on database views (PLACEHOLDER: Get view schemas)
+- Set up Flyway in shared module
+- Create migration scripts for Integration Service tables
+- Create JPA entities for Integration Service tables (configuration module)
+- Create JPA entities for view mapping in shared module (read-only)
+- Set up single HikariCP connection pool configuration (30 connections)
+- Test database connectivity and migrations
+
+**Task 1.4: Shared Module - Domain Model**
+- Define ApplicationDataProjection DTO in shared/domain/dto
+- Define domain DTOs (BaseInfoDTO, ContactPointsDTO, etc.) - PLACEHOLDER: Adjust based on actual domains
+- Create enums (DomainType, ChannelType, etc.) in shared/domain/enums
+- Set up MapStruct mappers in shared/mapper
+- Write mapper tests
+
+**Task 1.5: Shared Module - Repositories**
+- Implement ApplicationDataSummaryViewRepository in shared/repository
+- Implement ApplicationDataDetailedViewRepository in shared/repository
+- Implement query methods (findById, findByIds, findModifiedSince, etc.)
+- Write repository integration tests with Testcontainers
+
+### Phase 2: Configuration Module 
+
+**Task 2.1: Configuration Module - YAML Loading**
+- Implement YamlConfigLoader in configuration/loader
+- Define PartnerConfig model (maps to YAML structure)
+- Implement config validation logic
+- Create sample partner YAML configurations
+- Write unit tests for YAML loading
+
+**Task 2.2: Configuration Module - Database Integration**
+- Create PartnerMaster JPA entity in configuration/model
+- Create PartnerConfigAudit JPA entity in configuration/model
+- Implement PartnerMasterRepository in configuration/repository
+- Implement PartnerConfigAuditRepository in configuration/repository
+- Write repository tests
+
+**Task 2.3: Shared Module - ConfigurationService**
+- Implement ConfigurationService in shared/service
+- Implement YAML + Database merge logic
+- Implement configuration caching
+- Implement getPartnerConfig, getPartnerConfigForChannel methods
+- Implement configuration refresh endpoint (admin module will expose)
+- Write unit tests with mocked repositories
+- Write integration tests with test YAML files
+
+### Phase 3: Shared Module - Projection Service 
+
+**Task 3.1: ProjectionService Implementation**
+- Implement ProjectionService in shared/service
+- Implement buildSummaryProjection (queries summary view)
+- Implement buildDetailedProjection (queries detailed view, for future AI Agent)
+- Implement buildSummaryProjections (batch query)
+- Implement filterByPartnerConfig (domain filtering logic)
+- Write unit tests with mocked repositories
+- Write integration tests with real views
+
+**Task 3.2: MapStruct Mapper Configuration**
+- Configure MapStruct for view → DTO mapping
+- Implement ApplicationDataMapper in shared/mapper
+- Handle null domain fields gracefully
+- Test mapper generation and compilation
+
+### Phase 4: Search Module 
+
+**Task 4.1: Search Module - Elasticsearch Setup**
+- Create search/repository package
+- Set up Elasticsearch connection configuration in search module
+- Define search document schema (subset of summary fields)
+- Implement ApplicationSearchRepository (Spring Data ES)
+- Implement indexing logic
+
+**Task 4.2: Search Module - Sync Service**
+- Implement ElasticsearchSyncService in search/service
+- Implement scheduled sync job with in-memory checkpoint (every 5 minutes)
+- Implement incremental sync logic (based on last_modified)
+- Implement full reindex method
+- Document restart behavior (re-syncs last 24 hours)
+- Write tests for sync logic
+
+**Task 4.3: Search Module - API**
+- Create SearchRequest and SearchResponse DTOs in search/dto
+- Implement SearchController in search/controller
+- Implement SearchService in search/service
+- Implement search parameter validation
+- Implement Elasticsearch query builder
+- Integrate with shared ProjectionService
+- Implement partner-specific filtering via ConfigurationService
+- Implement pagination
+- Write controller tests and integration tests
+
+### Phase 5: Bulk Module 
+
+**Task 5.1: Bulk Module - Setup**
+- Create bulk/controller, bulk/service, bulk/dto packages
+- Define IdAndTimestamp DTO
+- Define BulkDataResponse DTO
+
+**Task 5.2: Bulk Module - IDs Endpoint**
+- Implement BulkIdsController in bulk/controller
+- Implement BulkService in bulk/service
+- Use bulkExecutor thread pool (@Async)
+- Implement query for IDs modified since timestamp
+- Include totalElements in response (for partner validation)
+- Implement pagination
+- Write API tests
+
+**Task 5.3: Bulk Module - Data Endpoint**
+- Implement BulkDataController in bulk/controller
+- Use bulkExecutor thread pool (@Async)
+- Implement batch query by IDs (up to 1000)
+- Integrate with shared ProjectionService
+- Implement partner-specific filtering via ConfigurationService
+- Implement pagination
+- Write API tests
+
+**Task 5.4: Bulk Module - Rate Limiting**
+- Implement concurrent request limiting with Semaphore (in common module)
+- Implement per-partner concurrency limits (max 2)
+- Implement global concurrency limit (max 10)
+- Implement rate limit exceeded response (429)
+- Document single-pod limitation
+- Write tests for rate limiting
+
+### Phase 6: Events Module 
+
+**Task 6.1: Events Module - Setup**
+- Create events/controller, events/service, events/repository, events/client, events/dto packages
+- Define EventPropagationRequest DTO
+- Define WorkflowStateChangedPayload DTO
+- Create EventDeliveryLog JPA entity
+- Create PartnerEventFailures JPA entity
+- Create repositories for event tables
+
+**Task 6.2: Events Module - Ingestion API**
+- Implement EventIngestionController in events/controller
+- Implement request validation
+- Implement authentication check
+- Implement idempotency check (event_id tracking)
+- Implement async handoff to EventProcessingService
+- Return 202 Accepted immediately
+- Write API tests
+
+**Task 6.3: Events Module - Processing Service**
+- Implement EventProcessingService in events/service
+- Use eventExecutor thread pool (@Async)
+- Implement partner selection logic (query enabled partners)
+- Integrate with shared ProjectionService
+- Integrate with shared ConfigurationService
+- Build projection per partner with filtering
+- Hand off to EventPublishingService for delivery
+- Write unit tests and integration tests
+
+**Task 6.4: Events Module - Publishing Service (Using Resilience4j)**
+- Implement EventPublishingService in events/service
+- Use webhookExecutor thread pool (@Async)
+- Add @CircuitBreaker annotation (Resilience4j)
+- Add @Retry annotation (Resilience4j)
+- Configure circuit breaker and retry in application.yaml
+- Implement PartnerWebhookClient in events/client (RestTemplate)
+- Implement partner authentication injection
+- Implement delivery logging (event_delivery_log table)
+- Write tests with WireMock
+
+**Task 6.5: Events Module - Dead Letter Queue**
+- Implement dead letter storage logic (partner_event_failures table)
+- Implement @Recover method for when retries exhausted
+- Write tests for recovery logic
+- NOTE: Manual retry via Admin API (next phase)
+
+### Phase 7: Admin Module 
+
+**Task 7.1: Admin Module - Setup**
+- Create admin/controller, admin/service, admin/dto packages
+- Define PartnerStatusResponse DTO
+- Define FailureResponse DTO
+
+**Task 7.2: Admin Module - Partner Management (MVP Endpoints)**
+- Implement AdminPartnerController in admin/controller
+- Implement AdminService in admin/service
+- POST /admin/partners/{id}/enable (updates partner_master)
+- POST /admin/partners/{id}/disable (updates partner_master)
+- POST /admin/partners/{id}/test (sends test event via EventPublishingService)
+- Integrate with configuration module and events module
+- Write API tests
+
+**Task 7.3: Admin Module - Failure Management**
+- Implement AdminFailuresController in admin/controller
+- GET /admin/partners/{id}/failures (query dead letter queue)
+- POST /admin/partners/{id}/failures/{eventId}/retry (manual retry)
+- Integrate with events module
+- Write API tests
+
+**Task 7.4: Thread Pool & Error Handling**
+- Verify separate thread pools configured (bulk, event, webhook)
+- Verify @Async methods use correct pools
+- Test thread pool isolation (bulk doesn't block search)
+- Verify GlobalExceptionHandler catches all exceptions
+- Verify error logging with context
+
+**Task 7.5: Monitoring & Metrics (MVP Scope)**
+- Implement 4 core custom metrics in common/metrics:
+  1. API request duration (automatic from Actuator)
+  2. Event processing success/failure counters
+  3. Webhook delivery success/failure per partner
+  4. Dead letter queue size gauge
+- Configure Prometheus export
+- Create basic Grafana dashboard (JSON template)
+- Set up logging to centralized system (if available)
+
+### Phase 8: Testing & Documentation 
+
+**Task 8.1: Comprehensive Testing**
+- Write missing unit tests (achieve 70% coverage per module)
+- Write integration tests for each module
+- Write end-to-end tests (cross-module scenarios)
+- Write load tests for Search and Bulk modules
+- Performance testing and optimization
+
+**Task 8.2: API Documentation**
+- Complete OpenAPI/Swagger documentation for all APIs
+- Add request/response examples
+- Document error codes and messages
+- Create partner integration guide:
+  - How to onboard
+  - How to validate bulk sync completeness
+  - How to handle errors
+  - Sample client code
+- Create operational runbook:
+  - How to enable/disable partners
+  - How to investigate failures
+  - How to manually retry events
+  - Common troubleshooting scenarios
+
+**Task 8.3: Deployment Preparation**
+- Create Dockerfile (single JAR with all modules)
+- Create Kubernetes manifests (single pod deployment)
+- Set up CI/CD pipeline
+- Prepare deployment checklist
+- Document rollback procedures
+- Document single-pod assumptions and future multi-pod migration path
+- Document module structure and boundaries
+
+### Phase 9: Pilot & Production 
+
+**Task 9.1: Staging Deployment**
+- Deploy to staging environment
+- Run full test suite in staging
+- Conduct partner integration testing
+- Performance and load testing in staging
+- Fix any issues found
+
+**Task 9.2: Pilot Partner Onboarding**
+- Onboard 1-2 pilot partners
+- Configure in database (partner_master) and YAML (partner-configs/)
+- Send test events via Admin API
+- Partner validates data received
+- Monitor for 1 week
+- Gather feedback
+
+**Task 9.3: Production Deployment**
+- Deploy to production (all partners disabled)
+- Verify health and connectivity
+- Verify all modules working (search, bulk, events, admin)
+- Enable pilot partners
+- Monitor for 48 hours (all modules)
+- Gradually enable remaining partners
+- Monitor and optimize
+
+### Phase 10: AI Agent Integration 
+
+**Task 10.1: AI Agent Configuration**
+- Create AI agent consumer configuration in partner-configs/ai-agent-internal.yaml
+- Set consumerType: AI_AGENT
+- Set projectionType: DETAILED
+- Configure which workflow states trigger AI review
+- Configure AI agent webhook URL
+- Add to partner_master table with special consumer type
+
+**Task 10.2: Detailed Projection Support in Events Module**
+- Modify EventProcessingService to check consumer type
+- If consumer type is AI_AGENT:
+  - Call ProjectionService.buildDetailedProjection() instead of buildSummaryProjection()
+  - Detailed projection includes all descriptive fields
+- Keep same domain filtering logic (configurable per AI agent)
+- Keep same webhook delivery mechanism (EventPublishingService)
+
+**Task 10.3: AI Agent Webhook Integration**
+- Implement test endpoint for AI agent (in Admin module)
+- Configure timeout (AI might take longer, e.g., 60 seconds)
+- Configure retry policy (same as partners, 5 attempts)
+- Monitor AI agent delivery separately (same metrics, labeled by consumer_id)
+
+**Task 10.4: Core App Integration (Coordinate with Core App Team)**
+- Core App triggers "PENDING_AI_REVIEW" state
+- Integration Service delivers detailed data to AI agent
+- AI agent analyzes and calls back to Core App with results
+- Core App processes AI recommendations
+- Core App transitions to next state based on AI response
+
+**Task 10.5: Testing**
+- Create test AI agent webhook (mock service)
+- Send test events with detailed projections
+- Verify AI agent receives all descriptive fields
+- Verify retry and circuit breaker work for AI agent
+- Load test: AI agent processing doesn't impact partner deliveries
+
+**IMPORTANT**: No separate AI Agent module needed. AI agents are just special consumers in the Events module with:
+- Different projection type (detailed vs summary)
+- Different field set (100% vs 60% fields)
+- Same delivery mechanism (webhooks)
+- Same configuration pattern (YAML + database)
+- Same monitoring and error handling
+
+
+This is much simpler than creating a separate module or API. The Events module architecture already supports multiple consumer types with different data needs.
+
+**TIMELINE SUMMARY**:
+- Modular structure: Each module can be developed/tested independently
+- Parallelization: Different developers can work on different modules simultaneously
+
+**MODULE INDEPENDENCE**:
+- Shared module must be done first (others depend on it)
+- Search, Bulk, Events modules can be developed in parallel after Shared is done
+- Admin module depends on Events module (for test endpoint)
+- Clear module boundaries enable parallel development
+
+**Task 1.1: Project Setup**
+- Initialize Spring Boot project with dependencies (including Resilience4j)
+- Set up Maven build
+- Configure application.yaml with placeholders
+- Set up logging configuration (Logback with JSON encoder)
+- Set up Actuator endpoints
+- Create README with setup instructions
+
+**Task 1.2: Database Setup**
+- Coordinate with Core App team on database views (PLACEHOLDER: Get view schemas)
+- Set up Flyway
+- Create migration scripts for Integration Service tables
+- Create JPA entities for Integration Service tables
+- Create JPA entities for view mapping (read-only)
+- Set up single HikariCP connection pool configuration (30 connections)
+
+**Task 1.3: Core Domain Model**
+- Define ApplicationDataProjection DTO
+- Define domain DTOs (BaseInfoDTO, ContactPointsDTO, etc.) - PLACEHOLDER: Adjust based on actual domains
+- Define request/response DTOs for APIs
+- Set up MapStruct mappers
+- Create enums (DomainType, ChannelType, etc.)
+
+### Phase 2: Configuration Management 
+
+**Task 2.1: Configuration Loading**
+- Implement YAML configuration loader
+- Implement database configuration loader (PartnerMasterRepository)
+- Implement configuration merge logic
+- Implement configuration caching
+- Implement configuration validation
+- Create sample partner YAML configurations
+
+**Task 2.2: Configuration Service**
+- Implement ConfigurationService
+- Implement configuration refresh endpoint
+- Write unit tests for configuration logic
+- Write integration tests with test YAML files
+
+**Task 2.3: Admin API for Configuration - MVP SCOPE ONLY**
+- Implement partner enable/disable endpoints
+- Implement test endpoint (send test event to partner)
+- Implement failures query endpoint
+- Implement manual retry endpoint
+- Write API tests
+- NOTE: Skip CRUD, audit history, full partner management for MVP
+
+### Phase 3: Data Access & Projection 
+
+**Task 3.1: View Repositories**
+- Implement ApplicationDataSummaryViewRepository
+- Implement ApplicationDataDetailedViewRepository (for future AI Agent)
+- Implement query methods (findById, findByIds, findModifiedSince, etc.)
+- Write integration tests with test data
+
+**Task 3.2: Projection Service**
+- Implement buildSummaryProjection
+- Implement buildDetailedProjection (for future)
+- Implement buildSummaryProjections (batch)
+- Implement filterByPartnerConfig
+- Implement domain filtering logic
+- Write unit tests with mocked repositories
+- Write integration tests with real views
+
+### Phase 4: Search API 
+
+**Task 4.1: Elasticsearch Setup**
+- Set up Elasticsearch connection configuration
+- Define search document schema (subset of summary fields)
+- Implement Elasticsearch repository
+- Implement indexing logic
+
+**Task 4.2: Elasticsearch Sync Service - SIMPLIFIED**
+- Implement scheduled sync job with in-memory checkpoint (every 5 minutes)
+- Implement incremental sync logic (based on last_modified)
+- Implement full reindex method
+- Document restart behavior (re-syncs last 24 hours)
+- Write tests for sync logic
+
+**Task 4.3: Search API Endpoint**
+- Implement Search API controller
+- Implement search parameter validation
+- Implement Elasticsearch query builder
+- Integrate with ProjectionService
+- Implement partner-specific filtering
+- Implement pagination
+- Write API tests
+
+### Phase 5: Bulk API 
+
+**Task 5.1: Bulk IDs Endpoint**
+- Implement Bulk IDs controller
+- Implement query for IDs modified since timestamp
+- Implement pagination
+- Write API tests
+
+**Task 5.2: Bulk Data Endpoint**
+- Implement Bulk Data controller using bulkExecutor thread pool
+- Implement batch query by IDs
+- Implement pagination
+- Integrate with ProjectionService
+- Implement partner-specific filtering
+- Write API tests
+
+**Task 5.3: Rate Limiting**
+- Implement concurrent request limiting with Semaphore (in-memory, single-pod)
+- Implement per-partner concurrency limits
+- Implement rate limit exceeded response (429)
+- Document single-pod limitation
+- Write tests for rate limiting
+
+### Phase 6: Event Processing 
+
+**Task 6.1: Event Ingestion API**
+- Implement Event Ingestion controller
+- Implement request validation
+- Implement authentication
+- Implement idempotency check
+- Implement async handoff to processing service
+- Write API tests
+
+**Task 6.2: Event Processing Service**
+- Implement EventProcessingService with eventExecutor thread pool
+- Implement async event processing
+- Implement partner selection logic
+- Integrate with ProjectionService
+- Implement event queuing
+- Write unit and integration tests
+
+**Task 6.3: Event Publishing Service - USING RESILIENCE4J**
+- Implement EventPublishingService with webhookExecutor thread pool
+- Add @CircuitBreaker and @Retry annotations (Resilience4j)
+- Configure circuit breaker and retry in application.yaml
+- Implement webhook client (RestTemplate)
+- Implement partner authentication injection
+- Implement delivery logging
+- Write tests with WireMock
+
+**Task 6.4: Dead Letter Queue**
+- Implement dead letter storage logic
+- Implement @Recover method for when retries exhausted
+- Implement manual retry functionality (Admin API)
+- Write tests for recovery logic
+- NOTE: No scheduled retry job for MVP (manual retry only)
+
+### Phase 7: Performance & Isolation 
+
+**Task 7.1: Thread Pool Configuration**
+- Configure separate thread pools (bulk, event, webhook)
+- Implement @Async methods with pool selection
+- Test thread pool isolation (bulk doesn't block search)
+- Document single connection pool design decision
+
+**Task 7.2: Error Handling**
+- Implement global exception handler
+- Implement error response DTOs
+- Implement error logging with context
+- Implement alerting integration (hook for alert system)
+
+**Task 7.3: Monitoring & Metrics - MVP SCOPE ONLY**
+- Implement 4 core custom metrics (Micrometer)
+  1. Request duration (automatic)
+  2. Event processing success/failure counters
+  3. Webhook delivery success/failure per partner
+  4. Dead letter queue size gauge
+- Configure Prometheus export
+- Create basic Grafana dashboard (JSON template)
+- Set up logging to centralized system
+- NOTE: Skip advanced metrics (thread pool, circuit breaker state, etc.) for MVP
+
+### Phase 8: Testing & Documentation 
+
+**Task 8.1: Comprehensive Testing**
+- Write missing unit tests (achieve 70% coverage - realistic for MVP)
+- Write integration tests for all APIs
+- Write load tests (JMeter or Gatling) - basic scenarios only
+- Performance testing and optimization
+
+**Task 8.2: API Documentation**
+- Complete OpenAPI/Swagger documentation
+- Add request/response examples
+- Document error codes and messages
+- Create partner integration guide (focused on MVP features)
+- Create operational runbook
+
+**Task 8.3: Deployment Preparation**
+- Create Dockerfile
+- Create Kubernetes manifests (single pod deployment)
+- Set up CI/CD pipeline
+- Prepare deployment checklist
+- Document rollback procedures
+- Document single-pod assumptions and future multi-pod migration path
+
+### Phase 9: Pilot & Production 
+
+**Task 9.1: Staging Deployment**
+- Deploy to staging environment
+- Run full test suite in staging
+- Conduct partner integration testing
+- Performance and load testing in staging
+- Fix any issues found
+
+**Task 9.2: Pilot Partner Onboarding**
+- Onboard 1-2 pilot partners
+- Configure in database and YAML
+- Send test events
+- Partner validates data received
+- Monitor for 1 week
+
+**Task 9.3: Production Deployment**
+- Deploy to production (all partners disabled)
+- Verify health and connectivity
+- Enable pilot partners
+- Monitor for 48 hours
+- Gradually enable remaining partners
+- Monitor and optimize
+
+### Phase 10: AI Agent Integration (Future - Post-MVP)
+
+**Task 10.1: AI Agent API Design**
+- Design AI Agent API specification
+- Determine additional metadata needed
+- Define AI Agent authentication
+- Create detailed projection specifically for AI
+
+**Task 10.2: AI Agent API Implementation**
+- Implement AI Agent endpoint
+- Use detailed_view for data source
+- Implement AI-specific filtering (if any)
+- Implement AI Agent webhook callback (if needed)
+- Test with AI Agent team
+
+
+
+**Task 1.1: Project Setup**
+- Initialize Spring Boot project with dependencies
+- Set up Maven/Gradle build
+- Configure application.yaml with placeholders
+- Set up logging configuration (Logback with JSON encoder)
+- Set up Actuator endpoints
+- Create README with setup instructions
+
+**Task 1.2: Database Setup**
+- Coordinate with Core App team on database views (PLACEHOLDER: Get view schemas)
+- Set up Flyway/Liquibase
+- Create migration scripts for Integration Service tables
+- Create JPA entities for Integration Service tables
+- Create JPA entities for view mapping (read-only)
+- Set up HikariCP connection pool configuration
+
+**Task 1.3: Core Domain Model**
+- Define ApplicationDataProjection DTO
+- Define domain DTOs (BaseInfoDTO, ContactPointsDTO, etc.) - PLACEHOLDER: Adjust based on actual domains
+- Define request/response DTOs for APIs
+- Set up MapStruct mappers
+- Create enums (DomainType, ChannelType, etc.)
+
+### Phase 2: Configuration Management 
+
+**Task 2.1: Configuration Loading**
+- Implement YAML configuration loader
+- Implement database configuration loader (PartnerMasterRepository)
+- Implement configuration merge logic
+- Implement configuration caching
+- Implement configuration validation
+- Create sample partner YAML configurations
+
+**Task 2.2: Configuration Service**
+- Implement ConfigurationService
+- Implement configuration refresh endpoint
+- Write unit tests for configuration logic
+- Write integration tests with test YAML files
+
+**Task 2.3: Admin API for Configuration**
+- Implement partner CRUD endpoints
+- Implement partner enable/disable endpoints
+- Implement configuration audit logging
+- Implement test endpoint (send test event to partner)
+
+### Phase 3: Data Access & Projection 
+
+**Task 3.1: View Repositories**
+- Implement ApplicationDataSummaryViewRepository
+- Implement ApplicationDataDetailedViewRepository
+- Implement query methods (findById, findByIds, findModifiedSince, etc.)
+- Write integration tests with test data
+
+**Task 3.2: Projection Service**
+- Implement buildSummaryProjection
+- Implement buildDetailedProjection
+- Implement buildSummaryProjections (batch)
+- Implement filterByPartnerConfig
+- Implement domain filtering logic
+- Implement field-level exclusion logic (if needed)
+- Write unit tests with mocked repositories
+- Write integration tests with real views
+
+### Phase 4: Search API 
+
+**Task 4.1: Elasticsearch Setup**
+- Set up Elasticsearch connection configuration
+- Define search document schema (subset of summary fields)
+- Implement Elasticsearch repository
+- Implement indexing logic
+
+**Task 4.2: Elasticsearch Sync Service**
+- Implement scheduled sync job (every 5 minutes)
+- Implement incremental sync logic (based on last_modified)
+- Implement full reindex method
+- Implement error handling and retry
+- Write tests for sync logic
+
+**Task 4.3: Search API Endpoint**
+- Implement Search API controller
+- Implement search parameter validation
+- Implement Elasticsearch query builder
+- Integrate with ProjectionService
+- Implement partner-specific filtering
+- Implement pagination
+- Write API tests
+
+### Phase 5: Bulk API 
+
+**Task 5.1: Bulk IDs Endpoint**
+- Implement Bulk IDs controller
+- Implement query for IDs modified since timestamp
+- Implement pagination
+- Write API tests
+
+**Task 5.2: Bulk Data Endpoint**
+- Implement Bulk Data controller
+- Implement batch query by IDs
+- Implement pagination and streaming (optional)
+- Integrate with ProjectionService
+- Implement partner-specific filtering
+- Write API tests
+
+**Task 5.3: Rate Limiting**
+- Implement concurrent request limiting (semaphore)
+- Implement per-partner concurrency limits
+- Implement rate limit exceeded response (429)
+- Write tests for rate limiting
+
+### Phase 6: Event Processing 
+
+**Task 6.1: Event Ingestion API**
+- Implement Event Ingestion controller
+- Implement request validation
+- Implement authentication
+- Implement idempotency check
+- Implement async handoff to processing service
+- Write API tests
+
+**Task 6.2: Event Processing Service**
+- Implement EventProcessingService
+- Implement async event processing
+- Implement partner selection logic
+- Integrate with ProjectionService
+- Implement event queuing
+- Write unit and integration tests
+
+**Task 6.3: Event Publishing Service**
+- Implement EventPublishingService
+- Implement webhook client (RestTemplate with retry)
+- Implement partner authentication injection
+- Implement delivery logging
+- Implement circuit breaker logic
+- Write tests with WireMock
+
+**Task 6.4: Dead Letter Queue**
+- Implement dead letter storage logic
+- Implement scheduled retry job
+- Implement manual retry functionality (Admin API)
+- Write tests for retry logic
+
+### Phase 7: Performance & Isolation 
+
+**Task 7.1: Thread Pool Configuration**
+- Configure separate thread pools (bulk, event, webhook)
+- Implement @Async methods with pool selection
+- Test thread pool isolation (bulk doesn't block search)
+
+**Task 7.2: Error Handling**
+- Implement global exception handler
+- Implement error response DTOs
+- Implement error logging with context
+- Implement alerting integration (hook for alert system)
+
+**Task 7.3: Monitoring & Metrics**
+- Implement custom metrics (Micrometer)
+- Configure Prometheus export
+- Create Grafana dashboard (JSON template)
+- Set up logging to centralized system
+
+### Phase 8: Testing & Documentation 
+
+**Task 8.1: Comprehensive Testing**
+- Write missing unit tests (achieve 80% coverage)
+- Write integration tests for all APIs
+- Write load tests (JMeter or Gatling)
+- Execute chaos testing scenarios
+- Performance testing and optimization
+
+**Task 8.2: API Documentation**
+- Complete OpenAPI/Swagger documentation
+- Add request/response examples
+- Document error codes and messages
+- Create partner integration guide
+- Create operational runbook
+
+**Task 8.3: Deployment Preparation**
+- Create Dockerfile
+- Create Kubernetes manifests
+- Set up CI/CD pipeline
+- Prepare deployment checklist
+- Document rollback procedures
+
+### Phase 9: Pilot & Production 
+
+**Task 9.1: Staging Deployment**
+- Deploy to staging environment
+- Run full test suite in staging
+- Conduct partner integration testing
+- Performance and load testing in staging
+- Fix any issues found
+
+**Task 9.2: Pilot Partner Onboarding**
+- Onboard 1-2 pilot partners
+- Configure in database and YAML
+- Send test events
+- Partner validates data received
+- Monitor for 1 week
+
+**Task 9.3: Production Deployment**
+- Deploy to production (all partners disabled)
+- Verify health and connectivity
+- Enable pilot partners
+- Monitor for 48 hours
+- Gradually enable remaining partners
+- Monitor and optimize
+
+### Phase 10: AI Agent Integration 
+
+**Task 10.1: AI Agent API Design**
+- Design AI Agent API specification
+- Determine additional metadata needed
+- Define AI Agent authentication
+- Create detailed projection specifically for AI
+
+**Task 10.2: AI Agent API Implementation**
+- Implement AI Agent endpoint
+- Use detailed_view for data source
+- Implement AI-specific filtering (if any)
+- Implement AI Agent webhook callback (if needed)
+- Test with AI Agent team
+
+---
+
+## 15. Key Considerations & Risks
+
+### Technical Risks
+
+**Risk 1: Database View Performance**
+- **Risk**: Views may be slow with complex joins and large data
+- **Mitigation**: Work with Core App team to optimize view queries, add indexes, consider materialized views
+- **Monitoring**: Track query execution times, alert if > 1 second
+
+**Risk 2: Elasticsearch Sync Lag**
+- **Risk**: 5-minute sync delay may not be acceptable for real-time search
+- **Mitigation**: Start with 5-minute sync, evaluate if real-time needed, consider event-based sync
+- **Monitoring**: Track sync lag metric, alert if > 10 minutes
+
+**Risk 3: Partner Webhook Reliability**
+- **Risk**: Partners may have unstable webhooks, causing high failure rates
+- **Mitigation**: Comprehensive retry logic, circuit breakers, dead letter queue, partner SLA discussions
+- **Monitoring**: Track per-partner success rates, alert on degradation
+
+**Risk 4: Memory Pressure from Bulk Operations**
+- **Risk**: Loading 1000+ records into memory for serialization may cause GC issues
+- **Mitigation**: Response streaming (chunked transfer encoding), pagination with smaller page sizes, monitor heap usage
+- **Monitoring**: Track heap utilization during bulk operations, GC pause times
+
+**Risk 5: Core App Event Delivery Failure**
+- **Risk**: If Integration Service is down, Core App dead letter grows without bounds
+- **Mitigation**: Core App dead letter capacity planning, alerting, replay mechanisms, consider Kafka for future
+- **Monitoring**: Track Core App dead letter size (coordinate monitoring with Core App team)
+
+
+
+## 17. Success Metrics
+
+### Technical Metrics
+
+**Availability**:
+- Target: 99.9% uptime (excluding planned maintenance)
+- Measure: Health check success rate
+
+**Performance**:
+- Search API P95 < 500ms: Target > 95% of requests
+- Bulk API P95 < 10s per 1000 records: Target > 95%
+- Event delivery P95 < 5 minutes: Target > 95%
+
+**Reliability**:
+- Event delivery success rate: Target > 99%
+- Partner webhook success rate: Target > 98% per partner
+- Zero data loss: All failed events in dead letter queue
+
+**Scalability**:
+- Support 10+ partners without performance degradation
+- Handle more events/day
+- Handle more search requests/day
+- Handle more records/day via bulk API
+
+
+### Quality Metrics
+
+**Code Quality**:
+- Unit test coverage: > 80%
+- Integration test coverage: All critical paths
+- Zero critical security vulnerabilities
+- Code review: 100% of changes reviewed
+
+**Operational Quality**:
+- Alert noise ratio: < 10% false positive rate
+- Incident response time: < 15 minutes to acknowledge
+- Post-incident reviews: 100% of production incidents
+
+---
+
+
+**End of Development Implementation Guide**
