@@ -1,0 +1,3626 @@
+# Workflow Engine - Complete Implementation Instructions for Devin.ai
+
+## Table of Contents
+1. [Project Overview](#project-overview)
+2. [Technology Stack](#technology-stack)
+3. [Project Structure](#project-structure)
+4. [Setup Instructions](#setup-instructions)
+5. [Phase 1: Core Workflow Engine](#phase-1-core-workflow-engine)
+6. [Phase 2: Dynamic Forms System](#phase-2-dynamic-forms-system)
+7. [Phase 3: Admin UI & Visualization](#phase-3-admin-ui--visualization)
+8. [Phase 4: Polish & Testing](#phase-4-polish--testing)
+9. [Testing Strategy](#testing-strategy)
+10. [API Documentation](#api-documentation)
+11. [Development Workflow](#development-workflow)
+12. [Appendices](#appendices)
+
+---
+
+## Project Overview
+
+### Goal
+Build a POC for a configuration-based workflow system using Camunda with dynamic form generation capabilities.
+
+### Key Features
+- **Dynamic Workflow Configuration**: Workflows defined in database, BPMN generated automatically
+- **Workflow Versioning**: In-flight processes continue on their version, new processes use new version
+- **Dynamic Forms**: Forms rendered from database configuration with 25+ field types
+- **Conditional Logic**: Show/hide fields based on other field values
+- **Parallel Workflows**: Support both sequential and parallel approval paths
+- **Admin Override**: Manual workflow progression when needed
+- **Audit Trail**: Complete history of workflow steps and field changes
+
+### Architecture
+- **Monorepo**: Single project with embedded React frontend
+- **Backend**: Spring Boot + Camunda (embedded engine)
+- **Frontend**: React + TypeScript served as static content from Spring Boot
+- **Database**: H2 in-memory (for POC)
+- **Build**: Gradle with React build integration
+
+---
+
+## Technology Stack
+
+### Backend
+- Java 17+
+- Spring Boot 3.2.x
+- Gradle 8.x
+- Camunda BPM 7.20.x (embedded)
+- H2 Database (in-memory)
+- SpringDoc OpenAPI (Swagger UI)
+- Lombok (code generation)
+- MapStruct (DTO mapping)
+- JUnit 5 + Mockito (testing)
+- RestAssured (API testing)
+- Jacoco (code coverage)
+
+### Frontend
+- React 18+
+- TypeScript
+- Vite (build tool)
+- TailwindCSS (styling)
+- React Hook Form (form state)
+- bpmn-js (BPMN viewer)
+- Axios (HTTP client)
+- React Router (navigation)
+- Jest + React Testing Library (testing)
+
+---
+
+## Project Structure
+
+```
+workflow-engine/
+├── src/
+│   ├── main/
+│   │   ├── java/com/company/workflow/
+│   │   │   ├── config/
+│   │   │   │   ├── CamundaConfig.java
+│   │   │   │   ├── OpenApiConfig.java
+│   │   │   │   └── WebConfig.java
+│   │   │   ├── controller/
+│   │   │   │   ├── WorkflowController.java
+│   │   │   │   ├── FormController.java
+│   │   │   │   └── AdminController.java
+│   │   │   ├── service/
+│   │   │   │   ├── WorkflowService.java
+│   │   │   │   ├── BpmnGenerationService.java
+│   │   │   │   ├── FormService.java
+│   │   │   │   ├── ValidationService.java
+│   │   │   │   ├── ConditionalLogicService.java
+│   │   │   │   └── AuditService.java
+│   │   │   ├── repository/
+│   │   │   │   ├── WorkflowTypeRepository.java
+│   │   │   │   ├── WorkflowVersionRepository.java
+│   │   │   │   ├── WorkflowStepRepository.java
+│   │   │   │   ├── WorkflowInstanceRepository.java
+│   │   │   │   ├── FormDefinitionRepository.java
+│   │   │   │   ├── FormFieldRepository.java
+│   │   │   │   └── ...
+│   │   │   ├── entity/
+│   │   │   │   ├── WorkflowType.java
+│   │   │   │   ├── WorkflowVersion.java
+│   │   │   │   ├── WorkflowStep.java
+│   │   │   │   ├── WorkflowInstance.java
+│   │   │   │   ├── FormDefinition.java
+│   │   │   │   ├── FormSection.java
+│   │   │   │   ├── FormField.java
+│   │   │   │   └── ...
+│   │   │   ├── dto/
+│   │   │   │   ├── request/
+│   │   │   │   └── response/
+│   │   │   ├── mapper/
+│   │   │   │   ├── WorkflowMapper.java
+│   │   │   │   └── FormMapper.java
+│   │   │   ├── bpmn/
+│   │   │   │   ├── BpmnGenerator.java
+│   │   │   │   ├── BpmnDeployer.java
+│   │   │   │   └── ProcessVariableHelper.java
+│   │   │   ├── validation/
+│   │   │   │   ├── ValidationEngine.java
+│   │   │   │   └── FieldValidator.java
+│   │   │   ├── stub/
+│   │   │   │   ├── ContactService.java
+│   │   │   │   ├── UserService.java
+│   │   │   │   └── EmailService.java
+│   │   │   └── exception/
+│   │   │       ├── WorkflowException.java
+│   │   │       ├── ValidationException.java
+│   │   │       └── GlobalExceptionHandler.java
+│   │   └── resources/
+│   │       ├── application.yml
+│   │       ├── application-test.yml
+│   │       ├── schema.sql
+│   │       ├── data.sql
+│   │       ├── test-data.sql
+│   │       └── static/  # React build output goes here
+│   └── test/
+│       ├── java/com/company/workflow/
+│       │   ├── unit/
+│       │   │   ├── service/
+│       │   │   ├── bpmn/
+│       │   │   └── validation/
+│       │   └── integration/
+│       │       ├── WorkflowIntegrationTest.java
+│       │       ├── FormSubmissionIntegrationTest.java
+│       │       └── AdminIntegrationTest.java
+│       └── resources/
+│           └── test-data.sql
+│
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── forms/
+│   │   │   │   ├── DynamicFormRenderer.tsx
+│   │   │   │   ├── DynamicField.tsx
+│   │   │   │   ├── FormSection.tsx
+│   │   │   │   └── fields/
+│   │   │   │       ├── TextInput.tsx
+│   │   │   │       ├── NumberInput.tsx
+│   │   │   │       ├── DatePicker.tsx
+│   │   │   │       ├── RadioGroup.tsx
+│   │   │   │       ├── CheckboxGroup.tsx
+│   │   │   │       ├── DropdownSelect.tsx
+│   │   │   │       ├── TextArea.tsx
+│   │   │   │       ├── ToggleSwitch.tsx
+│   │   │   │       ├── RatingInput.tsx
+│   │   │   │       ├── UserPicker.tsx
+│   │   │   │       ├── DataTable.tsx
+│   │   │   │       └── CalculatedField.tsx
+│   │   │   ├── workflow/
+│   │   │   │   ├── BpmnViewer.tsx
+│   │   │   │   ├── WorkflowInstanceList.tsx
+│   │   │   │   ├── WorkflowInstanceDetail.tsx
+│   │   │   │   └── StepProgress.tsx
+│   │   │   ├── admin/
+│   │   │   │   ├── AdminDashboard.tsx
+│   │   │   │   ├── ManualOverride.tsx
+│   │   │   │   └── AuditTrailViewer.tsx
+│   │   │   └── common/
+│   │   ├── services/
+│   │   │   ├── api.ts
+│   │   │   ├── workflowService.ts
+│   │   │   ├── formService.ts
+│   │   │   └── adminService.ts
+│   │   ├── hooks/
+│   │   │   ├── useForm.ts
+│   │   │   ├── useWorkflow.ts
+│   │   │   └── useValidation.ts
+│   │   ├── utils/
+│   │   │   ├── conditionalLogic.ts
+│   │   │   ├── validation.ts
+│   │   │   └── formatters.ts
+│   │   ├── types/
+│   │   │   ├── workflow.types.ts
+│   │   │   ├── form.types.ts
+│   │   │   └── api.types.ts
+│   │   ├── __tests__/
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── tsconfig.json
+│
+├── build.gradle
+├── settings.gradle
+├── gradle.properties
+└── README.md
+```
+
+---
+
+## Setup Instructions
+
+### Prerequisites
+- JDK 17 or higher
+- Node.js 20.x or higher
+- Gradle 8.x (or use wrapper)
+
+### Initial Project Setup
+
+1. Create Gradle project with Spring Initializr dependencies
+2. Configure Gradle to build React during Spring Boot build
+3. Set up H2 database configuration
+4. Configure Camunda embedded engine
+5. Set up OpenAPI/Swagger UI
+
+### Gradle Configuration
+
+**build.gradle** should include:
+- Spring Boot plugin
+- Node Gradle plugin (for React build)
+- Jacoco plugin (code coverage)
+- Custom tasks: npmInstall, npmBuild, copyReactBuild, integrationTest, testAll
+- Dependencies: Spring Boot, Camunda, H2, OpenAPI, Lombok, MapStruct, testing libraries
+
+**Key Gradle Tasks**:
+```bash
+./gradlew bootRun          # Run backend only (dev mode)
+./gradlew build            # Build everything (backend + React)
+./gradlew test             # Run unit tests
+./gradlew integrationTest  # Run integration tests
+./gradlew testAll          # Run all tests (unit + integration + frontend)
+./gradlew jacocoTestReport # Generate coverage report
+```
+
+### Application Configuration
+
+**application.yml**:
+```yaml
+spring:
+  application:
+    name: workflow-engine
+  datasource:
+    url: jdbc:h2:mem:workflowdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    hibernate:
+      ddl-auto: none  # Use schema.sql instead
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:data.sql
+
+camunda:
+  bpm:
+    admin-user:
+      id: admin
+      password: admin
+    filter:
+      create: All tasks
+    webapp:
+      index-redirect-enabled: true
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+server:
+  port: 8080
+
+# Serve React app from static resources
+spring.web.resources.static-locations: classpath:/static/
+```
+
+### Accessing the Application
+
+Once the application is running, you can access:
+
+**Main Application (React UI)**: http://localhost:8080
+- The React frontend (workflow management UI)
+- After production build, served as static content
+
+**Camunda Web Interface**: http://localhost:8080/camunda
+- **Cockpit**: http://localhost:8080/camunda/app/cockpit/default/
+  - View running process instances
+  - Monitor process definitions
+  - Check incidents and errors
+  - Inspect process variables
+- **Tasklist**: http://localhost:8080/camunda/app/tasklist/default/
+  - View and complete user tasks
+  - Filter tasks by assignee
+- **Admin**: http://localhost:8080/camunda/app/admin/default/
+  - User management
+  - System settings
+  - Authorization management
+- **Login credentials**: 
+  - Username: `admin`
+  - Password: `admin`
+
+**Swagger UI**: http://localhost:8080/swagger-ui.html
+- Interactive API documentation
+- Test all REST endpoints
+- View request/response schemas
+- Execute API calls directly from browser
+
+**H2 Database Console**: http://localhost:8080/h2-console
+- Direct database access
+- Run SQL queries
+- Inspect tables and data
+- **Connection settings**:
+  - JDBC URL: `jdbc:h2:mem:workflowdb`
+  - Username: `sa`
+  - Password: (leave empty)
+
+**Development Mode (React Dev Server)**: http://localhost:3000
+- Hot-reload during development
+- React app with Vite dev server
+- Proxies API calls to backend at :8080
+- Only available when running `npm run dev`
+
+### Important: Camunda Webapp Configuration
+
+To ensure Camunda web interface is accessible, add this dependency in **build.gradle**:
+
+```gradle
+dependencies {
+    // ... other dependencies
+    
+    // Camunda webapps (Cockpit, Tasklist, Admin)
+    implementation "org.camunda.bpm.springboot:camunda-bpm-spring-boot-starter-webapp:${camundaVersion}"
+    
+    // This includes:
+    // - Camunda Cockpit (process monitoring)
+    // - Camunda Tasklist (task management) 
+    // - Camunda Admin (user/auth management)
+}
+```
+
+The `camunda-bpm-spring-boot-starter-webapp` dependency automatically:
+- Deploys Camunda web applications
+- Configures URL mappings under `/camunda`
+- Sets up authentication
+- Integrates with Spring Security (if configured)
+
+### URL Structure Summary
+
+```
+http://localhost:8080/
+├── /                          → React App (Main UI)
+├── /api/                      → REST APIs
+│   ├── /workflows/            → Workflow management
+│   ├── /forms/                → Form management
+│   └── /admin/                → Admin operations
+├── /camunda/                  → Camunda Platform
+│   ├── /app/cockpit/          → Process monitoring
+│   ├── /app/tasklist/         → Task management
+│   ├── /app/admin/            → Admin interface
+│   └── /api/engine/           → Camunda REST API
+├── /swagger-ui.html           → API documentation
+├── /api-docs                  → OpenAPI JSON spec
+└── /h2-console                → Database console
+```
+
+### Quick Start URLs (After Running)
+
+Copy and paste these into your browser after starting the application:
+
+```
+Main App:        http://localhost:8080
+Camunda Cockpit: http://localhost:8080/camunda/app/cockpit/default/
+Swagger:         http://localhost:8080/swagger-ui.html
+H2 Console:      http://localhost:8080/h2-console
+```
+
+### Frontend Configuration
+
+**vite.config.ts**:
+```typescript
+// Configure proxy to backend during development
+export default defineConfig({
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8080',
+      '/engine-rest': 'http://localhost:8080'
+    }
+  }
+})
+```
+
+---
+
+## Phase 1: Core Workflow Engine
+
+### Goals
+- Set up database schema for workflow configuration
+- Implement BPMN generation from database configuration
+- Deploy generated BPMN to Camunda engine
+- Create REST APIs for workflow management
+- Start and manage workflow instances
+
+### Database Schema
+
+Create **schema.sql** with the following tables:
+
+#### WORKFLOW_TYPE
+```sql
+CREATE TABLE workflow_type (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    current_version_id BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+```
+
+#### WORKFLOW_VERSION
+```sql
+CREATE TABLE workflow_version (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    workflow_type_id BIGINT NOT NULL,
+    version_number INT NOT NULL,
+    process_definition_key VARCHAR(255),  -- e.g., 'purchase-request-v1'
+    camunda_deployment_id VARCHAR(255),
+    bpmn_xml TEXT,  -- Store generated BPMN for auditing
+    status VARCHAR(50) NOT NULL,  -- DRAFT, ACTIVE, DEPRECATED
+    effective_from TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(255),
+    FOREIGN KEY (workflow_type_id) REFERENCES workflow_type(id),
+    UNIQUE(workflow_type_id, version_number)
+);
+```
+
+#### WORKFLOW_STEP
+```sql
+CREATE TABLE workflow_step (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    workflow_version_id BIGINT NOT NULL,
+    step_key VARCHAR(100) NOT NULL,  -- e.g., 'SPONSOR_APPROVED'
+    step_name VARCHAR(255) NOT NULL,
+    step_order INT NOT NULL,
+    step_type VARCHAR(50) NOT NULL,  -- USER_TASK, SERVICE_TASK, START_EVENT, END_EVENT
+    assignee_type VARCHAR(50),  -- REQUESTOR, CONTACT_ROLE, USER, EXPRESSION
+    assignee_value VARCHAR(255),  -- e.g., 'SPONSOR' for contact role
+    config_json TEXT,  -- Additional configuration as JSON
+    FOREIGN KEY (workflow_version_id) REFERENCES workflow_version(id),
+    UNIQUE(workflow_version_id, step_key)
+);
+```
+
+#### WORKFLOW_STEP_CONDITION
+```sql
+CREATE TABLE workflow_step_condition (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    from_step_id BIGINT NOT NULL,
+    to_step_id BIGINT NOT NULL,
+    condition_type VARCHAR(50),  -- SEQUENTIAL, PARALLEL_FORK, PARALLEL_JOIN
+    condition_order INT,
+    FOREIGN KEY (from_step_id) REFERENCES workflow_step(id),
+    FOREIGN KEY (to_step_id) REFERENCES workflow_step(id)
+);
+```
+
+#### WORKFLOW_INSTANCE
+```sql
+CREATE TABLE workflow_instance (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    workflow_type_id BIGINT NOT NULL,
+    workflow_version_id BIGINT NOT NULL,
+    camunda_process_instance_id VARCHAR(255),
+    business_object_type VARCHAR(100),  -- e.g., 'PURCHASE_REQUEST'
+    business_object_id VARCHAR(255),     -- e.g., 'PR-001'
+    current_step_key VARCHAR(100),
+    status VARCHAR(50) NOT NULL,  -- IN_PROGRESS, COMPLETED, CANCELLED, ERROR
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    FOREIGN KEY (workflow_type_id) REFERENCES workflow_type(id),
+    FOREIGN KEY (workflow_version_id) REFERENCES workflow_version(id)
+);
+```
+
+#### WORKFLOW_INSTANCE_HISTORY
+```sql
+CREATE TABLE workflow_instance_history (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    workflow_instance_id BIGINT NOT NULL,
+    step_key VARCHAR(100) NOT NULL,
+    action VARCHAR(50) NOT NULL,  -- STARTED, COMPLETED, APPROVED, REJECTED, REWORK, MANUAL_OVERRIDE
+    actor_user_id VARCHAR(255),
+    actor_user_name VARCHAR(255),
+    comments TEXT,
+    is_manual_override BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workflow_instance_id) REFERENCES workflow_instance(id)
+);
+```
+
+#### Stub Tables (For POC)
+
+```sql
+-- Simple user table for POC
+CREATE TABLE user (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(100) NOT NULL UNIQUE,
+    email VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Contact assignments for business objects
+CREATE TABLE contact (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    business_object_type VARCHAR(100) NOT NULL,
+    business_object_id VARCHAR(255) NOT NULL,
+    user_id BIGINT NOT NULL,
+    contact_role VARCHAR(50) NOT NULL,  -- SPONSOR, OWNER, MANAGER
+    FOREIGN KEY (user_id) REFERENCES user(id),
+    UNIQUE(business_object_type, business_object_id, user_id, contact_role)
+);
+```
+
+### Sample Data
+
+Create **data.sql** with sample data:
+
+```sql
+-- Sample users
+INSERT INTO user (username, email, full_name) VALUES
+('alice', 'alice@example.com', 'Alice Smith'),
+('bob', 'bob@example.com', 'Bob Jones'),
+('charlie', 'charlie@example.com', 'Charlie Brown'),
+('david', 'david@example.com', 'David Wilson');
+
+-- Sample workflow type
+INSERT INTO workflow_type (id, name, description) VALUES
+(1, 'Purchase Request Approval', 'Standard purchase request approval workflow');
+
+-- Sample workflow version
+INSERT INTO workflow_version (id, workflow_type_id, version_number, process_definition_key, status, effective_from) VALUES
+(1, 1, 1, 'purchase-request-v1', 'ACTIVE', CURRENT_TIMESTAMP);
+
+-- Sample workflow steps (sequential)
+INSERT INTO workflow_step (workflow_version_id, step_key, step_name, step_order, step_type, assignee_type, assignee_value) VALUES
+(1, 'DRAFT', 'Draft', 1, 'USER_TASK', 'REQUESTOR', NULL),
+(1, 'SUBMITTED', 'Submitted', 2, 'USER_TASK', 'REQUESTOR', NULL),
+(1, 'SPONSOR_APPROVED', 'Sponsor Approval', 3, 'USER_TASK', 'CONTACT_ROLE', 'SPONSOR'),
+(1, 'OWNER_APPROVED', 'Owner Approval', 4, 'USER_TASK', 'CONTACT_ROLE', 'OWNER'),
+(1, 'MANAGER_APPROVED', 'Manager Approval', 5, 'USER_TASK', 'CONTACT_ROLE', 'MANAGER'),
+(1, 'END', 'Completed', 6, 'END_EVENT', NULL, NULL);
+
+-- Sequential connections
+INSERT INTO workflow_step_condition (from_step_id, to_step_id, condition_type, condition_order) VALUES
+((SELECT id FROM workflow_step WHERE step_key='DRAFT' AND workflow_version_id=1),
+ (SELECT id FROM workflow_step WHERE step_key='SUBMITTED' AND workflow_version_id=1),
+ 'SEQUENTIAL', 1),
+((SELECT id FROM workflow_step WHERE step_key='SUBMITTED' AND workflow_version_id=1),
+ (SELECT id FROM workflow_step WHERE step_key='SPONSOR_APPROVED' AND workflow_version_id=1),
+ 'SEQUENTIAL', 2),
+((SELECT id FROM workflow_step WHERE step_key='SPONSOR_APPROVED' AND workflow_version_id=1),
+ (SELECT id FROM workflow_step WHERE step_key='OWNER_APPROVED' AND workflow_version_id=1),
+ 'SEQUENTIAL', 3),
+((SELECT id FROM workflow_step WHERE step_key='OWNER_APPROVED' AND workflow_version_id=1),
+ (SELECT id FROM workflow_step WHERE step_key='MANAGER_APPROVED' AND workflow_version_id=1),
+ 'SEQUENTIAL', 4),
+((SELECT id FROM workflow_step WHERE step_key='MANAGER_APPROVED' AND workflow_version_id=1),
+ (SELECT id FROM workflow_step WHERE step_key='END' AND workflow_version_id=1),
+ 'SEQUENTIAL', 5);
+
+-- Sample contacts for a purchase request
+INSERT INTO contact (business_object_type, business_object_id, user_id, contact_role) VALUES
+('PURCHASE_REQUEST', 'PR-001', 2, 'SPONSOR'),  -- Bob is sponsor
+('PURCHASE_REQUEST', 'PR-001', 3, 'SPONSOR'),  -- Charlie is also sponsor
+('PURCHASE_REQUEST', 'PR-001', 4, 'OWNER'),    -- David is owner
+('PURCHASE_REQUEST', 'PR-001', 2, 'MANAGER');  -- Bob is also manager
+```
+
+### Entity Layer
+
+#### WorkflowType.java
+```
+@Entity
+@Table(name = "workflow_type")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+
+Fields:
+- id: Long
+- name: String
+- description: String
+- currentVersionId: Long
+- createdAt: LocalDateTime
+- updatedAt: LocalDateTime
+
+Relationships:
+- @OneToMany versions
+```
+
+#### WorkflowVersion.java
+```
+@Entity
+@Table(name = "workflow_version")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+
+Fields:
+- id: Long
+- workflowTypeId: Long
+- versionNumber: Integer
+- processDefinitionKey: String
+- camundaDeploymentId: String
+- bpmnXml: String
+- status: WorkflowVersionStatus (enum: DRAFT, ACTIVE, DEPRECATED)
+- effectiveFrom: LocalDateTime
+- createdAt: LocalDateTime
+- createdBy: String
+
+Relationships:
+- @ManyToOne workflowType
+- @OneToMany steps
+```
+
+#### WorkflowStep.java
+```
+@Entity
+@Table(name = "workflow_step")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+
+Fields:
+- id: Long
+- workflowVersionId: Long
+- stepKey: String
+- stepName: String
+- stepOrder: Integer
+- stepType: StepType (enum: USER_TASK, SERVICE_TASK, START_EVENT, END_EVENT)
+- assigneeType: AssigneeType (enum: REQUESTOR, CONTACT_ROLE, USER, EXPRESSION)
+- assigneeValue: String
+- configJson: String
+
+Relationships:
+- @ManyToOne workflowVersion
+- @OneToMany outgoingConditions
+- @OneToMany incomingConditions
+```
+
+#### WorkflowStepCondition.java
+```
+@Entity
+@Table(name = "workflow_step_condition")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+
+Fields:
+- id: Long
+- fromStepId: Long
+- toStepId: Long
+- conditionType: ConditionType (enum: SEQUENTIAL, PARALLEL_FORK, PARALLEL_JOIN)
+- conditionOrder: Integer
+
+Relationships:
+- @ManyToOne fromStep
+- @ManyToOne toStep
+```
+
+#### WorkflowInstance.java
+```
+@Entity
+@Table(name = "workflow_instance")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+
+Fields:
+- id: Long
+- workflowTypeId: Long
+- workflowVersionId: Long
+- camundaProcessInstanceId: String
+- businessObjectType: String
+- businessObjectId: String
+- currentStepKey: String
+- status: WorkflowStatus (enum: IN_PROGRESS, COMPLETED, CANCELLED, ERROR)
+- startedAt: LocalDateTime
+- completedAt: LocalDateTime
+
+Relationships:
+- @ManyToOne workflowType
+- @ManyToOne workflowVersion
+- @OneToMany history
+```
+
+#### WorkflowInstanceHistory.java
+```
+@Entity
+@Table(name = "workflow_instance_history")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+
+Fields:
+- id: Long
+- workflowInstanceId: Long
+- stepKey: String
+- action: HistoryAction (enum: STARTED, COMPLETED, APPROVED, REJECTED, REWORK, MANUAL_OVERRIDE)
+- actorUserId: String
+- actorUserName: String
+- comments: String
+- isManualOverride: Boolean
+- createdAt: LocalDateTime
+
+Relationships:
+- @ManyToOne workflowInstance
+```
+
+### Service Layer
+
+#### BpmnGenerationService
+
+**Responsibility**: Generate valid Camunda BPMN 2.0 XML from workflow configuration
+
+**Key Methods**:
+
+```
+generateBpmn(Long workflowVersionId): String
+  Input: Workflow version ID
+  Output: Valid BPMN 2.0 XML string
+  Logic:
+    1. Fetch WorkflowVersion and all WorkflowSteps (ordered by stepOrder)
+    2. Fetch all WorkflowStepConditions
+    3. Determine workflow structure (sequential, parallel, or mixed)
+    4. Build BPMN model:
+       - Create BpmnModelInstance
+       - Add process element with processDefinitionKey
+       - Add start event
+       - For each step:
+         * If USER_TASK: Create userTask with id=stepKey, name=stepName
+         * If END_EVENT: Create endEvent
+       - For each condition:
+         * If SEQUENTIAL: Create sequenceFlow
+         * If PARALLEL_FORK: Create parallelGateway (fork)
+         * If PARALLEL_JOIN: Create parallelGateway (join)
+       - Connect all elements
+    5. Validate BPMN structure
+    6. Convert to XML string
+    7. Store bpmnXml in WorkflowVersion
+  Error Handling: Throw WorkflowException if invalid configuration
+
+deployBpmn(Long workflowVersionId): String
+  Input: Workflow version ID
+  Output: Camunda deployment ID
+  Logic:
+    1. Generate BPMN using generateBpmn()
+    2. Deploy to Camunda using RepositoryService
+    3. Store deploymentId in WorkflowVersion
+    4. Update version status to ACTIVE
+  Error Handling: Throw WorkflowException if deployment fails
+```
+
+**BPMN Generation Algorithm**:
+
+For **Sequential Workflow**:
+```xml
+<bpmn:process id="purchase-request-v1">
+  <bpmn:startEvent id="StartEvent"/>
+  <bpmn:sequenceFlow sourceRef="StartEvent" targetRef="DRAFT"/>
+  
+  <bpmn:userTask id="DRAFT" name="Draft"/>
+  <bpmn:sequenceFlow sourceRef="DRAFT" targetRef="SUBMITTED"/>
+  
+  <bpmn:userTask id="SUBMITTED" name="Submitted"/>
+  <bpmn:sequenceFlow sourceRef="SUBMITTED" targetRef="SPONSOR_APPROVED"/>
+  
+  <!-- ... more tasks ... -->
+  
+  <bpmn:endEvent id="END"/>
+</bpmn:process>
+```
+
+For **Parallel Workflow**:
+```xml
+<bpmn:process id="purchase-request-v2">
+  <bpmn:startEvent id="StartEvent"/>
+  <bpmn:sequenceFlow sourceRef="StartEvent" targetRef="SUBMITTED"/>
+  
+  <bpmn:userTask id="SUBMITTED" name="Submitted"/>
+  <bpmn:sequenceFlow sourceRef="SUBMITTED" targetRef="ParallelFork"/>
+  
+  <!-- Fork -->
+  <bpmn:parallelGateway id="ParallelFork"/>
+  <bpmn:sequenceFlow sourceRef="ParallelFork" targetRef="SPONSOR_APPROVED"/>
+  <bpmn:sequenceFlow sourceRef="ParallelFork" targetRef="OWNER_APPROVED"/>
+  
+  <!-- Parallel tasks -->
+  <bpmn:userTask id="SPONSOR_APPROVED" name="Sponsor Approval"/>
+  <bpmn:userTask id="OWNER_APPROVED" name="Owner Approval"/>
+  
+  <bpmn:sequenceFlow sourceRef="SPONSOR_APPROVED" targetRef="ParallelJoin"/>
+  <bpmn:sequenceFlow sourceRef="OWNER_APPROVED" targetRef="ParallelJoin"/>
+  
+  <!-- Join -->
+  <bpmn:parallelGateway id="ParallelJoin"/>
+  <bpmn:sequenceFlow sourceRef="ParallelJoin" targetRef="MANAGER_APPROVED"/>
+  
+  <bpmn:userTask id="MANAGER_APPROVED" name="Manager Approval"/>
+  <bpmn:sequenceFlow sourceRef="MANAGER_APPROVED" targetRef="END"/>
+  
+  <bpmn:endEvent id="END"/>
+</bpmn:process>
+```
+
+**Testing**:
+- Unit test: Sequential workflow generation
+- Unit test: Parallel workflow generation
+- Unit test: Invalid configuration handling (missing steps, circular dependencies)
+- Integration test: Generated BPMN deploys successfully to Camunda
+- Integration test: Deployed process can be started
+
+#### WorkflowService
+
+**Responsibility**: Manage workflow instances and execution
+
+**Key Methods**:
+
+```
+startWorkflow(StartWorkflowRequest): WorkflowInstance
+  Input: workflowTypeId, businessObjectType, businessObjectId, startedByUserId
+  Output: Created WorkflowInstance
+  Logic:
+    1. Get current active WorkflowVersion for the workflow type
+    2. Create WorkflowInstance record (status=IN_PROGRESS)
+    3. Resolve assignee for first step (usually REQUESTOR)
+    4. Start Camunda process instance:
+       - processDefinitionKey from version
+       - businessKey = businessObjectId
+       - variables: businessObjectType, businessObjectId, requestorId
+    5. Store Camunda processInstanceId in WorkflowInstance
+    6. Create history record (action=STARTED)
+  Error Handling: Throw WorkflowException if workflow type inactive or not found
+
+completeStep(CompleteStepRequest): void
+  Input: workflowInstanceId, action (APPROVE/REJECT/REWORK), comments, actorUserId
+  Output: void
+  Logic:
+    1. Get WorkflowInstance
+    2. Get current Camunda task for this process instance
+    3. Based on action:
+       - APPROVE: Complete task with variable "decision=APPROVED"
+       - REJECT: Complete task with "decision=REJECTED", terminate process
+       - REWORK: Complete task with "decision=REWORK", navigate to previous step
+    4. Update WorkflowInstance.currentStepKey
+    5. If workflow completed, update status=COMPLETED, completedAt
+    6. Create history record
+  Error Handling: Throw ValidationException if action invalid
+
+getWorkflowInstance(Long id): WorkflowInstanceResponse
+  Input: Workflow instance ID
+  Output: DTO with instance details, current step, history
+  Logic:
+    1. Fetch WorkflowInstance with history
+    2. Fetch Camunda process instance details
+    3. Map to DTO
+  Error Handling: Throw NotFoundException if not found
+
+queryWorkflowInstances(QueryRequest): Page<WorkflowInstanceResponse>
+  Input: filters (workflowTypeId, status, businessObjectType, etc.), pagination
+  Output: Paginated list of instances
+  Logic:
+    1. Build JPA criteria query based on filters
+    2. Execute with pagination
+    3. Map to DTOs
+  Error Handling: None (empty list if no results)
+```
+
+#### ContactService (Stub)
+
+**Responsibility**: Resolve contacts for business objects (STUB for POC)
+
+**Key Methods**:
+
+```
+getContactsForBusinessObject(String type, String id, String role): List<User>
+  Input: Business object type, ID, contact role (SPONSOR/OWNER/MANAGER)
+  Output: List of users assigned to that role
+  Logic (POC):
+    1. Query CONTACT table by businessObjectType, businessObjectId, contactRole
+    2. Join with USER table
+    3. Return list of users
+  TODO: In production, call external contact service API
+  Error Handling: Return empty list if no contacts found
+```
+
+#### EmailService (Stub)
+
+**Responsibility**: Send email notifications (STUB for POC)
+
+**Key Methods**:
+
+```
+sendTaskAssignmentEmail(String toEmail, String taskName, String workflowId): void
+  Input: Recipient email, task name, workflow instance ID
+  Output: void
+  Logic (POC):
+    1. Log to console: "EMAIL: Task '{taskName}' assigned to {toEmail} for workflow {workflowId}"
+  TODO: Integrate with actual email service (SendGrid, AWS SES, SMTP)
+  Error Handling: Catch and log any exceptions, don't fail workflow
+
+sendDecisionEmail(String toEmail, String decision, String workflowId): void
+  Input: Recipient email, decision (APPROVED/REJECTED), workflow ID
+  Output: void
+  Logic (POC):
+    1. Log to console: "EMAIL: Workflow {workflowId} {decision}, notifying {toEmail}"
+  TODO: Integrate with actual email service
+  Error Handling: Catch and log exceptions
+```
+
+### Controller Layer
+
+#### WorkflowController
+
+**Endpoints**:
+
+```
+POST /api/workflows/types
+  Request: CreateWorkflowTypeRequest {name, description}
+  Response: WorkflowTypeResponse
+  Logic: Create workflow type
+
+POST /api/workflows/types/{id}/versions
+  Request: CreateVersionRequest {steps[], conditions[]}
+  Response: WorkflowVersionResponse
+  Logic: Create new version, generate and deploy BPMN
+
+POST /api/workflows/instances/start
+  Request: StartWorkflowRequest {workflowTypeId, businessObjectType, businessObjectId, startedByUserId}
+  Response: WorkflowInstanceResponse
+  Logic: Start new workflow instance
+
+POST /api/workflows/instances/{id}/complete
+  Request: CompleteStepRequest {action, comments, actorUserId}
+  Response: void (204 No Content)
+  Logic: Complete current step
+
+GET /api/workflows/instances/{id}
+  Response: WorkflowInstanceResponse
+  Logic: Get instance details
+
+GET /api/workflows/instances
+  Query Params: workflowTypeId, status, page, size
+  Response: Page<WorkflowInstanceResponse>
+  Logic: Query instances with filters
+
+GET /api/workflows/types
+  Response: List<WorkflowTypeResponse>
+  Logic: List all workflow types
+
+GET /api/workflows/types/{id}/versions
+  Response: List<WorkflowVersionResponse>
+  Logic: List versions for a type
+```
+
+### Testing Requirements
+
+#### Unit Tests
+
+**BpmnGenerationServiceTest**:
+- testGenerateSequentialWorkflow()
+- testGenerateParallelWorkflow()
+- testGenerateMixedWorkflow()
+- testInvalidConfigurationThrowsException()
+- testBpmnXmlIsValidXml()
+
+**WorkflowServiceTest**:
+- testStartWorkflow()
+- testCompleteStepWithApprove()
+- testCompleteStepWithReject()
+- testCompleteStepWithRework()
+- testStartWorkflowWithInactiveVersionThrowsException()
+
+#### Integration Tests
+
+**WorkflowIntegrationTest**:
+- testCreateWorkflowTypeAndVersion()
+- testDeployBpmnToCamunda()
+- testStartWorkflowInstance()
+- testCompleteWorkflowEndToEnd()
+- testParallelWorkflowExecution()
+- testRejectTerminatesWorkflow()
+- testReworkGoesToPreviousStep()
+
+### Acceptance Criteria for Phase 1
+
+- [ ] Database schema created and initialized
+- [ ] Sample workflow type and version in database
+- [ ] BPMN generation works for sequential workflows
+- [ ] BPMN generation works for parallel workflows
+- [ ] Generated BPMN deploys successfully to Camunda
+- [ ] Can start workflow instance via API
+- [ ] Can complete steps via API (Approve/Reject/Rework)
+- [ ] Workflow history is recorded
+- [ ] Swagger UI accessible at /swagger-ui.html
+- [ ] All APIs testable via Swagger
+- [ ] Unit tests pass with >80% coverage
+- [ ] Integration tests pass
+- [ ] H2 console accessible at /h2-console
+
+---
+
+## Phase 2: Dynamic Forms System
+
+### Goals
+- Create database schema for form definitions
+- Implement 25+ field types
+- Build dynamic form rendering engine (React)
+- Implement conditional logic (show/hide fields)
+- Implement validation engine (client + server)
+- Integrate form submission with Camunda task completion
+
+### Database Schema (Forms)
+
+#### FORM_DEFINITION
+```sql
+CREATE TABLE form_definition (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    workflow_step_id BIGINT NOT NULL,
+    form_key VARCHAR(255) NOT NULL UNIQUE,
+    form_name VARCHAR(255) NOT NULL,
+    form_version INT NOT NULL,
+    form_description TEXT,
+    status VARCHAR(50) NOT NULL,  -- DRAFT, ACTIVE, DEPRECATED
+    effective_from TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(255),
+    is_current_version BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (workflow_step_id) REFERENCES workflow_step(id)
+);
+```
+
+#### FORM_SECTION
+```sql
+CREATE TABLE form_section (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    form_definition_id BIGINT NOT NULL,
+    section_key VARCHAR(100) NOT NULL,
+    section_title VARCHAR(255) NOT NULL,
+    section_description TEXT,
+    display_order INT NOT NULL,
+    collapsible BOOLEAN DEFAULT TRUE,
+    default_collapsed BOOLEAN DEFAULT FALSE,
+    conditional_display_rule TEXT,  -- JSON
+    FOREIGN KEY (form_definition_id) REFERENCES form_definition(id),
+    UNIQUE(form_definition_id, section_key)
+);
+```
+
+#### FORM_FIELD
+```sql
+CREATE TABLE form_field (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    form_section_id BIGINT NOT NULL,
+    field_key VARCHAR(100) NOT NULL,
+    field_label VARCHAR(255) NOT NULL,
+    field_type VARCHAR(50) NOT NULL,
+    field_description TEXT,
+    placeholder_text VARCHAR(255),
+    display_order INT NOT NULL,
+    is_required BOOLEAN DEFAULT FALSE,
+    default_value TEXT,
+    config_json TEXT,  -- Field-specific configuration
+    FOREIGN KEY (form_section_id) REFERENCES form_section(id),
+    UNIQUE(form_section_id, field_key)
+);
+```
+
+#### FORM_FIELD_OPTION
+```sql
+CREATE TABLE form_field_option (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    form_field_id BIGINT NOT NULL,
+    option_value VARCHAR(255) NOT NULL,
+    option_label VARCHAR(255) NOT NULL,
+    display_order INT NOT NULL,
+    is_default BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (form_field_id) REFERENCES form_field(id)
+);
+```
+
+#### FORM_FIELD_VALIDATION
+```sql
+CREATE TABLE form_field_validation (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    form_field_id BIGINT NOT NULL,
+    validation_type VARCHAR(50) NOT NULL,  -- REQUIRED, MIN, MAX, PATTERN, MIN_LENGTH, MAX_LENGTH, etc.
+    validation_config TEXT,  -- JSON config
+    error_message VARCHAR(500) NOT NULL,
+    validation_order INT,
+    FOREIGN KEY (form_field_id) REFERENCES form_field(id)
+);
+```
+
+#### FORM_FIELD_CONDITION
+```sql
+CREATE TABLE form_field_condition (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    form_field_id BIGINT NOT NULL,
+    condition_type VARCHAR(50) NOT NULL,  -- SHOW_IF, HIDE_IF, ENABLE_IF, DISABLE_IF, REQUIRE_IF
+    depends_on_field_id BIGINT NOT NULL,
+    operator VARCHAR(50) NOT NULL,  -- EQUALS, NOT_EQUALS, GREATER_THAN, LESS_THAN, IN, CONTAINS
+    comparison_value TEXT,  -- JSON (can be single value or array)
+    logical_operator VARCHAR(10),  -- AND, OR (for multiple conditions)
+    condition_group INT,  -- Group related conditions
+    FOREIGN KEY (form_field_id) REFERENCES form_field(id),
+    FOREIGN KEY (depends_on_field_id) REFERENCES form_field(id)
+);
+```
+
+#### FORM_SUBMISSION
+```sql
+CREATE TABLE form_submission (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    workflow_instance_id BIGINT NOT NULL,
+    workflow_step_id BIGINT NOT NULL,
+    form_definition_id BIGINT NOT NULL,
+    submitted_by_user_id VARCHAR(255),
+    submission_data TEXT,  -- JSON with all field values
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workflow_instance_id) REFERENCES workflow_instance(id),
+    FOREIGN KEY (workflow_step_id) REFERENCES workflow_step(id),
+    FOREIGN KEY (form_definition_id) REFERENCES form_definition(id)
+);
+```
+
+#### FORM_FIELD_RESPONSE
+```sql
+CREATE TABLE form_field_response (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    form_submission_id BIGINT NOT NULL,
+    form_field_id BIGINT NOT NULL,
+    field_key VARCHAR(100) NOT NULL,
+    response_value TEXT,
+    response_json TEXT,  -- For complex values (multi-select, table, etc.)
+    FOREIGN KEY (form_submission_id) REFERENCES form_submission(id),
+    FOREIGN KEY (form_field_id) REFERENCES form_field(id)
+);
+```
+
+#### FORM_FIELD_AUDIT
+```sql
+CREATE TABLE form_field_audit (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    workflow_instance_id BIGINT NOT NULL,
+    form_field_id BIGINT NOT NULL,
+    field_key VARCHAR(100) NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    changed_by_user_id VARCHAR(255),
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    change_reason VARCHAR(50),  -- REWORK, EDIT, CORRECTION
+    FOREIGN KEY (workflow_instance_id) REFERENCES workflow_instance(id),
+    FOREIGN KEY (form_field_id) REFERENCES form_field(id)
+);
+```
+
+### Sample Form Data
+
+Add to **data.sql**:
+
+```sql
+-- Form definition for SPONSOR_APPROVED step
+INSERT INTO form_definition (id, workflow_step_id, form_key, form_name, form_version, status, effective_from) VALUES
+(1, (SELECT id FROM workflow_step WHERE step_key='SPONSOR_APPROVED' AND workflow_version_id=1),
+ 'sponsor-approval-form-v1', 'Sponsor Approval Form', 1, 'ACTIVE', CURRENT_TIMESTAMP);
+
+-- Sections
+INSERT INTO form_section (form_definition_id, section_key, section_title, display_order, collapsible, default_collapsed) VALUES
+(1, 'approval_decision', 'Approval Decision', 1, FALSE, FALSE),
+(1, 'request_details', 'Request Details', 2, TRUE, FALSE),
+(1, 'financial_info', 'Financial Information', 3, TRUE, FALSE);
+
+-- Fields for approval_decision section
+INSERT INTO form_field (form_section_id, field_key, field_label, field_type, display_order, is_required) VALUES
+((SELECT id FROM form_section WHERE section_key='approval_decision'), 'decision', 'Your Decision', 'RADIO', 1, TRUE),
+((SELECT id FROM form_section WHERE section_key='approval_decision'), 'comments', 'Comments', 'TEXTAREA', 2, TRUE);
+
+-- Options for decision field
+INSERT INTO form_field_option (form_field_id, option_value, option_label, display_order) VALUES
+((SELECT id FROM form_field WHERE field_key='decision'), 'APPROVE', 'Approve', 1),
+((SELECT id FROM form_field WHERE field_key='decision'), 'REJECT', 'Reject', 2),
+((SELECT id FROM form_field WHERE field_key='decision'), 'REWORK', 'Request Changes', 3);
+
+-- Validation for comments field
+INSERT INTO form_field_validation (form_field_id, validation_type, validation_config, error_message) VALUES
+((SELECT id FROM form_field WHERE field_key='comments'), 'MIN_LENGTH', '{"minLength": 10}', 'Please provide at least 10 characters'),
+((SELECT id FROM form_field WHERE field_key='comments'), 'MAX_LENGTH', '{"maxLength": 500}', 'Comments cannot exceed 500 characters');
+
+-- Fields for request_details section (display-only context)
+INSERT INTO form_field (form_section_id, field_key, field_label, field_type, display_order, is_required, config_json) VALUES
+((SELECT id FROM form_section WHERE section_key='request_details'), 'requestor_name', 'Requestor', 'DISPLAY_ONLY', 1, FALSE, '{"readonly": true}'),
+((SELECT id FROM form_section WHERE section_key='request_details'), 'request_title', 'Request Title', 'DISPLAY_ONLY', 2, FALSE, '{"readonly": true}'),
+((SELECT id FROM form_section WHERE section_key='request_details'), 'request_date', 'Request Date', 'DISPLAY_ONLY', 3, FALSE, '{"readonly": true}');
+
+-- Fields for financial_info section
+INSERT INTO form_field (form_section_id, field_key, field_label, field_type, display_order, is_required, config_json) VALUES
+((SELECT id FROM form_section WHERE section_key='financial_info'), 'amount', 'Amount (USD)', 'NUMBER', 1, FALSE, '{"readonly": true, "prefix": "$", "decimals": 2}'),
+((SELECT id FROM form_section WHERE section_key='financial_info'), 'budget_code', 'Budget Code', 'TEXT', 2, FALSE, '{"readonly": true}');
+```
+
+### Field Types to Support
+
+Implement the following field types (24 types, excluding FILE_UPLOAD):
+
+1. **TEXT** - Single line text input
+2. **TEXTAREA** - Multi-line text input
+3. **NUMBER** - Numeric input (integer or decimal)
+4. **EMAIL** - Email with validation
+5. **PHONE** - Phone number with formatting
+6. **URL** - URL with validation
+7. **DATE** - Date picker
+8. **TIME** - Time picker
+9. **DATETIME** - Combined date and time
+10. **DATE_RANGE** - Start and end date
+11. **RADIO** - Single select (radio buttons)
+12. **CHECKBOX** - Multi-select (checkboxes)
+13. **DROPDOWN** - Single select dropdown
+14. **MULTI_SELECT** - Multi-select dropdown
+15. **TOGGLE** - Yes/No switch
+16. **USER_PICKER** - Select user(s) from organization
+17. **ROLE_PICKER** - Select role(s)
+18. **TABLE** - Repeating rows (dynamic grid)
+19. **RICH_TEXT** - Formatted text editor (simple)
+20. **RATING** - Star rating or scale
+21. **SLIDER** - Numeric range slider
+22. **CALCULATED** - Computed from other fields
+23. **DISPLAY_ONLY** - Show information, no input
+24. **SECTION_HEADER** - Visual separator
+
+### Backend Service Layer
+
+#### FormService
+
+**Responsibility**: Manage form definitions and submissions
+
+**Key Methods**:
+
+```
+getFormDefinitionForStep(Long stepId): FormDefinitionResponse
+  Input: Workflow step ID
+  Output: Complete form definition (sections, fields, options, validations, conditions)
+  Logic:
+    1. Get current active FormDefinition for step
+    2. Fetch all FormSections (ordered by displayOrder)
+    3. For each section, fetch FormFields (ordered)
+    4. For each field, fetch options, validations, conditions
+    5. Map to DTO structure
+  Error Handling: Throw NotFoundException if no form found
+
+getFormWithData(Long workflowInstanceId): FormWithDataResponse
+  Input: Workflow instance ID
+  Output: Form definition + previous submission data (if exists)
+  Logic:
+    1. Get WorkflowInstance
+    2. Get current step
+    3. Get form definition for step
+    4. Check if previous submission exists (for REWORK scenario)
+    5. Merge form definition with existing data
+  Error Handling: Return form without data if no previous submission
+
+submitForm(SubmitFormRequest): void
+  Input: workflowInstanceId, formData (Map<fieldKey, value>), actorUserId
+  Output: void
+  Logic:
+    1. Validate form data (server-side validation)
+    2. If REWORK: Compare with previous submission, record field changes in audit table
+    3. Create FormSubmission record
+    4. Create FormFieldResponse records for each field
+    5. Extract decision field value (APPROVE/REJECT/REWORK)
+    6. Call WorkflowService.completeStep() with decision
+    7. Send email notification (via EmailService stub)
+  Error Handling: Throw ValidationException if validation fails
+
+saveDraft(SaveDraftRequest): void
+  Input: workflowInstanceId, formData (partial)
+  Output: void
+  Logic:
+    1. Save partial form data (no validation)
+    2. Store in FormSubmission with status=DRAFT
+  Error Handling: None (best effort save)
+```
+
+#### ValidationService
+
+**Responsibility**: Server-side form validation
+
+**Key Methods**:
+
+```
+validateForm(FormDefinition, Map<String, Object> formData): ValidationResult
+  Input: Form definition, submitted data
+  Output: ValidationResult {isValid, errors: Map<fieldKey, List<errorMessage>>}
+  Logic:
+    1. For each field in form:
+       a. Check if required and value present
+       b. Run all field validations:
+          - MIN/MAX for numbers
+          - MIN_LENGTH/MAX_LENGTH for text
+          - PATTERN for regex
+          - EMAIL format
+          - URL format
+          - DATE range
+       c. Run cross-field validations
+    2. Aggregate all errors
+    3. Return result
+  Error Handling: None (return validation result)
+
+validateField(FormField, Object value, Map<String, Object> allData): List<String>
+  Input: Field definition, field value, all form data
+  Output: List of error messages (empty if valid)
+  Logic:
+    1. Apply each validation rule for field
+    2. Collect error messages
+  Error Handling: None
+```
+
+#### ConditionalLogicService
+
+**Responsibility**: Evaluate conditional field display/enable rules
+
+**Key Methods**:
+
+```
+evaluateConditions(FormDefinition, Map<String, Object> formData): Map<String, FieldState>
+  Input: Form definition, current form data
+  Output: Map<fieldKey, FieldState{visible, enabled, required}>
+  Logic:
+    1. For each field with conditions:
+       a. Get dependsOnField value from formData
+       b. Evaluate condition (operator + comparisonValue)
+       c. Determine if field should be shown/hidden/enabled/disabled
+    2. Handle grouped conditions with AND/OR logic
+    3. Return state map for all fields
+  Error Handling: Default to visible/enabled if condition evaluation fails
+
+shouldShowField(FormField, Map<String, Object> formData): boolean
+  Input: Field with conditions, form data
+  Output: true if field should be visible
+  Logic:
+    1. If no conditions, return true
+    2. Evaluate all conditions for this field
+    3. Apply logical operators (AND/OR)
+  Error Handling: Default to true
+```
+
+### Controller Layer
+
+#### FormController
+
+**Endpoints**:
+
+```
+GET /api/forms/definition/{stepId}
+  Path Param: stepId (workflow step ID)
+  Response: FormDefinitionResponse
+  Logic: Get form definition for step
+
+GET /api/forms/instance/{workflowInstanceId}
+  Path Param: workflowInstanceId
+  Response: FormWithDataResponse
+  Logic: Get form definition + existing data
+
+POST /api/forms/submit
+  Request: SubmitFormRequest {workflowInstanceId, formData, actorUserId}
+  Response: void (204 No Content)
+  Logic: Validate and submit form, complete workflow task
+
+POST /api/forms/draft
+  Request: SaveDraftRequest {workflowInstanceId, formData}
+  Response: void (204 No Content)
+  Logic: Save draft without validation
+
+GET /api/forms/submission/{workflowInstanceId}
+  Path Param: workflowInstanceId
+  Response: List<FormSubmissionResponse>
+  Logic: Get submission history for instance
+```
+
+### Frontend Components
+
+#### Form Component Structure
+
+```
+components/
+  forms/
+    DynamicFormRenderer.tsx
+      - Main form container
+      - Loads form definition from API
+      - Manages form state
+      - Handles submission
+      - Props: workflowInstanceId
+      
+    FormSection.tsx
+      - Renders a section with title, description
+      - Handles collapsible behavior
+      - Props: section, isCollapsed, onToggle
+      
+    DynamicField.tsx
+      - Field wrapper with label, description, error display
+      - Routes to specific field component based on fieldType
+      - Props: field, value, onChange, errors
+      
+    FieldWrapper.tsx
+      - Common wrapper for all field types
+      - Shows label, required indicator, help text, errors
+      - Props: label, required, description, error, children
+      
+    fields/
+      TextInput.tsx
+      NumberInput.tsx
+      DatePicker.tsx
+      RadioGroup.tsx
+      CheckboxGroup.tsx
+      DropdownSelect.tsx
+      TextArea.tsx
+      ToggleSwitch.tsx
+      RatingInput.tsx
+      UserPicker.tsx
+      DataTable.tsx
+      CalculatedField.tsx
+      DisplayOnlyField.tsx
+      ... (all 24 field types)
+```
+
+#### Key Frontend Logic
+
+**DynamicFormRenderer.tsx**:
+```typescript
+// Responsibilities:
+- Fetch form definition on mount
+- Initialize form state with default values or existing data
+- Evaluate conditional logic on every field change
+- Run client-side validation
+- Handle form submission
+- Display loading/error states
+
+// Key hooks:
+- useState for form data
+- useState for field visibility/enabled state
+- useState for validation errors
+- useEffect to load form definition
+- useEffect to evaluate conditions when form data changes
+
+// Key functions:
+- loadFormDefinition()
+- handleFieldChange(fieldKey, value)
+- evaluateConditionalLogic()
+- validateForm()
+- handleSubmit()
+- handleSaveDraft()
+```
+
+**ConditionalLogic Utility**:
+```typescript
+// File: utils/conditionalLogic.ts
+
+evaluateCondition(
+  condition: FieldCondition,
+  formData: Record<string, any>
+): boolean
+  - Get value of dependsOnField from formData
+  - Apply operator (EQUALS, GREATER_THAN, IN, etc.)
+  - Return boolean result
+
+evaluateAllConditions(
+  field: FormField,
+  formData: Record<string, any>
+): FieldState
+  - Evaluate all conditions for a field
+  - Apply logical operators (AND/OR)
+  - Return {visible, enabled, required}
+
+getVisibleFields(
+  formDefinition: FormDefinition,
+  formData: Record<string, any>
+): Set<string>
+  - Return set of field keys that should be visible
+  - Based on conditional logic evaluation
+```
+
+**Validation Utility**:
+```typescript
+// File: utils/validation.ts
+
+validateField(
+  field: FormField,
+  value: any,
+  allFormData: Record<string, any>
+): string[]
+  - Run all validations for a field
+  - Return array of error messages
+
+validateForm(
+  formDefinition: FormDefinition,
+  formData: Record<string, any>
+): ValidationErrors
+  - Validate all required and visible fields
+  - Return map of fieldKey -> error messages
+
+// Validation types to implement:
+- REQUIRED
+- MIN / MAX (for numbers)
+- MIN_LENGTH / MAX_LENGTH (for strings)
+- PATTERN (regex)
+- EMAIL
+- URL
+- PHONE
+- DATE_RANGE
+- CROSS_FIELD (custom logic)
+```
+
+### Field Component Examples
+
+Each field component should:
+- Accept value and onChange props
+- Render appropriate HTML input
+- Apply field-specific config (from config_json)
+- Handle formatting (e.g., currency, phone)
+- Be accessible (proper labels, ARIA attributes)
+
+**TextInput.tsx**:
+```typescript
+interface TextInputProps {
+  field: FormField;
+  value: string;
+  onChange: (value: string) => void;
+  error?: string;
+  disabled?: boolean;
+}
+
+// Config options:
+- maxLength
+- minLength
+- pattern (regex)
+- placeholder
+- prefix/suffix
+```
+
+**NumberInput.tsx**:
+```typescript
+interface NumberInputProps {
+  field: FormField;
+  value: number;
+  onChange: (value: number) => void;
+  error?: string;
+  disabled?: boolean;
+}
+
+// Config options:
+- min/max
+- step (increment)
+- decimals (precision)
+- prefix (e.g., "$")
+- suffix (e.g., "USD")
+- thousandsSeparator
+```
+
+**RadioGroup.tsx**:
+```typescript
+interface RadioGroupProps {
+  field: FormField;
+  value: string;
+  onChange: (value: string) => void;
+  options: FormFieldOption[];
+  error?: string;
+  disabled?: boolean;
+}
+
+// Render radio buttons from options
+// Handle selection
+```
+
+**DataTable.tsx** (Complex):
+```typescript
+interface DataTableProps {
+  field: FormField;
+  value: any[];  // Array of row objects
+  onChange: (value: any[]) => void;
+  error?: string;
+  disabled?: boolean;
+}
+
+// Config options:
+- columns: [{key, label, type, required}]
+- minRows/maxRows
+- allowAdd/allowDelete
+
+// Features:
+- Add/remove rows
+- Validate each cell
+- Support different field types per column
+```
+
+### Testing Requirements
+
+#### Backend Unit Tests
+
+**ValidationServiceTest**:
+- testRequiredFieldValidation()
+- testMinLengthValidation()
+- testMaxLengthValidation()
+- testPatternValidation()
+- testEmailValidation()
+- testNumberRangeValidation()
+- testCrossFieldValidation()
+
+**ConditionalLogicServiceTest**:
+- testShowIfEqualsCondition()
+- testHideIfCondition()
+- testGreaterThanCondition()
+- testInArrayCondition()
+- testMultipleConditionsWithAnd()
+- testMultipleConditionsWithOr()
+- testNestedConditions()
+
+#### Backend Integration Tests
+
+**FormSubmissionIntegrationTest**:
+- testSubmitFormCompletesTask()
+- testFormValidationRejectsInvalidData()
+- testReworkRecordsFieldChanges()
+- testDraftSaveDoesNotValidate()
+- testConditionalFieldsNotValidatedWhenHidden()
+
+#### Frontend Unit Tests
+
+**DynamicFormRenderer.test.tsx**:
+- renders form sections and fields correctly
+- initializes form with default values
+- updates field visibility based on conditions
+- validates required fields on submit
+- shows validation errors
+- calls onSubmit with form data
+
+**conditionalLogic.test.ts**:
+- evaluates EQUALS condition correctly
+- evaluates GREATER_THAN condition correctly
+- evaluates IN condition correctly
+- handles AND logic for multiple conditions
+- handles OR logic for multiple conditions
+
+**validation.test.ts**:
+- validates required fields
+- validates min/max for numbers
+- validates email format
+- validates URL format
+- validates pattern (regex)
+- validates cross-field dependencies
+
+### Acceptance Criteria for Phase 2
+
+- [ ] Form definition schema created
+- [ ] Sample form with 20+ fields configured in database
+- [ ] All 24 field types implemented and working
+- [ ] Conditional logic working (show/hide fields based on other fields)
+- [ ] Client-side validation working
+- [ ] Server-side validation working
+- [ ] Form submission completes Camunda task
+- [ ] REWORK scenario records field change audit
+- [ ] Draft save functionality working
+- [ ] Form renders correctly in browser
+- [ ] All field types display and accept input correctly
+- [ ] Unit tests pass with >80% coverage
+- [ ] Integration tests pass
+- [ ] Forms are responsive (mobile-friendly)
+
+---
+
+## Phase 3: Admin UI & Visualization
+
+### Goals
+- Build admin dashboard
+- Implement BPMN diagram viewer
+- Create workflow instance monitoring
+- Implement manual override functionality
+- Build audit trail viewer
+
+### Frontend Components
+
+#### Admin Dashboard
+
+**components/admin/AdminDashboard.tsx**:
+```typescript
+// Responsibilities:
+- Display overview statistics (total workflows, in-progress, completed)
+- Show recent workflow instances
+- Provide navigation to detail views
+
+// Features:
+- Workflow count by status
+- Workflow count by type
+- Recent activity feed
+- Quick actions (start workflow, override)
+```
+
+#### BPMN Viewer
+
+**components/workflow/BpmnViewer.tsx**:
+```typescript
+// Responsibilities:
+- Load BPMN XML from backend
+- Render BPMN diagram using bpmn-js viewer
+- Highlight current step
+- Show completed steps in green
+- Show active step in yellow
+
+// Dependencies:
+- bpmn-js (install: npm install bpmn-js)
+
+// Key props:
+- processDefinitionKey: string
+- currentStepKey?: string
+- completedStepKeys?: string[]
+
+// Implementation:
+1. Import BpmnViewer from 'bpmn-js/lib/NavigatedViewer'
+2. Fetch BPMN XML from /api/bpmn/{processDefinitionKey}
+3. Call viewer.importXML(bpmnXml)
+4. Get canvas and apply overlays:
+   - Green overlay for completed steps
+   - Yellow overlay for current step
+5. Zoom to fit
+
+// Styling:
+- Container with fixed height (600px)
+- Add pan/zoom controls
+- Responsive design
+```
+
+#### Workflow Instance List
+
+**components/workflow/WorkflowInstanceList.tsx**:
+```typescript
+// Responsibilities:
+- Display paginated list of workflow instances
+- Filter by workflow type, status, business object
+- Sort by date, status
+- Click to view details
+
+// Features:
+- Search/filter bar
+- Status badges (In Progress, Completed, Cancelled)
+- Pagination controls
+- Click row to navigate to detail view
+
+// Props:
+- filters?: WorkflowFilters
+- onInstanceClick: (instanceId) => void
+```
+
+#### Workflow Instance Detail
+
+**components/workflow/WorkflowInstanceDetail.tsx**:
+```typescript
+// Responsibilities:
+- Show complete workflow instance details
+- Display BPMN diagram with current step highlighted
+- Show step history
+- Show form submission data (read-only)
+- Provide manual override actions (admin only)
+
+// Layout:
+- Header: Business object ID, status, dates
+- BPMN Diagram: Full-width diagram
+- Current Task: Task name, assignees, duration
+- History: Timeline of all steps
+- Audit Trail: All actions and changes
+- Admin Actions: Manual override buttons
+
+// Features:
+- Load workflow instance details
+- Load and display BPMN diagram
+- Show step-by-step history with timestamps
+- Show submitted form data for each step
+- Admin override section (conditionally shown)
+```
+
+#### Manual Override Component
+
+**components/admin/ManualOverride.tsx**:
+```typescript
+// Responsibilities:
+- Allow admin to manually complete current step
+- Allow admin to move workflow to any step
+- Allow admin to cancel workflow
+- Require confirmation and reason
+
+// Features:
+- "Complete Step As Approved" button
+- "Complete Step As Rejected" button
+- "Move to Different Step" - dropdown of all steps
+- "Cancel Workflow" button
+- All actions require confirmation modal
+- Reason/comment required for audit
+
+// Props:
+- workflowInstanceId: number
+- currentStepKey: string
+- availableSteps: WorkflowStep[]
+- onActionComplete: () => void
+
+// Implementation:
+1. Confirmation modal before any action
+2. Require admin to enter reason
+3. Call admin API endpoint
+4. Show success/error toast
+5. Refresh workflow instance
+```
+
+#### Audit Trail Viewer
+
+**components/admin/AuditTrailViewer.tsx**:
+```typescript
+// Responsibilities:
+- Display complete audit trail for workflow instance
+- Show all step transitions
+- Show all form submissions
+- Show field-level changes (for REWORK scenario)
+- Highlight manual overrides
+
+// Features:
+- Timeline view
+- Expandable items to see details
+- Color-coded actions (Approved=green, Rejected=red, Override=orange)
+- Show actor, timestamp, comments
+- Show before/after values for field changes
+- Export audit trail as JSON/CSV
+
+// Data structure:
+- Fetch WorkflowInstanceHistory
+- Fetch FormSubmissions with field responses
+- Fetch FormFieldAudit records
+- Merge and sort by timestamp
+
+// Layout:
+- Vertical timeline
+- Each entry shows: timestamp, actor, action, details
+- Manual overrides clearly marked
+- Field changes shown as "Field X: old → new"
+```
+
+### Backend Service Layer
+
+#### AdminService
+
+**Responsibility**: Admin override and management operations
+
+**Key Methods**:
+
+```
+completeStepAsAdmin(AdminCompleteRequest): void
+  Input: workflowInstanceId, decision (APPROVE/REJECT), reason, adminUserId
+  Output: void
+  Logic:
+    1. Get WorkflowInstance
+    2. Get current Camunda task
+    3. Complete task with decision
+    4. Record in history with isManualOverride=true
+    5. Send email notification (if not already sent)
+  Error Handling: Throw WorkflowException if task not found
+  
+moveWorkflowToStep(AdminMoveRequest): void
+  Input: workflowInstanceId, targetStepKey, reason, adminUserId
+  Output: void
+  Logic:
+    1. Get WorkflowInstance
+    2. Get current and target WorkflowStep
+    3. Use Camunda Process Instance Modification API:
+       - Cancel current activity
+       - Start target activity
+    4. Update WorkflowInstance.currentStepKey
+    5. Record in history with isManualOverride=true, action=MANUAL_MOVE
+  Error Handling: Throw WorkflowException if step invalid or Camunda modification fails
+  
+cancelWorkflow(AdminCancelRequest): void
+  Input: workflowInstanceId, reason, adminUserId
+  Output: void
+  Logic:
+    1. Get WorkflowInstance
+    2. Delete Camunda process instance
+    3. Update WorkflowInstance.status=CANCELLED
+    4. Record in history
+  Error Handling: Throw WorkflowException if already completed
+
+getAuditTrail(Long workflowInstanceId): AuditTrailResponse
+  Input: Workflow instance ID
+  Output: Complete audit trail (history + form submissions + field changes)
+  Logic:
+    1. Fetch WorkflowInstanceHistory
+    2. Fetch FormSubmissions with responses
+    3. Fetch FormFieldAudit records
+    4. Merge all into timeline structure
+    5. Sort by timestamp
+  Error Handling: Throw NotFoundException if instance not found
+```
+
+### Controller Layer
+
+#### AdminController
+
+**Endpoints**:
+
+```
+POST /api/admin/workflows/{id}/complete
+  Request: AdminCompleteRequest {decision, reason, adminUserId}
+  Response: void (204 No Content)
+  Logic: Complete current step as admin
+
+POST /api/admin/workflows/{id}/move
+  Request: AdminMoveRequest {targetStepKey, reason, adminUserId}
+  Response: void (204 No Content)
+  Logic: Move workflow to specified step
+
+POST /api/admin/workflows/{id}/cancel
+  Request: AdminCancelRequest {reason, adminUserId}
+  Response: void (204 No Content)
+  Logic: Cancel workflow
+
+GET /api/admin/audit/{workflowInstanceId}
+  Response: AuditTrailResponse
+  Logic: Get complete audit trail
+
+GET /api/admin/workflows/instances
+  Query Params: All filters, pagination
+  Response: Page<WorkflowInstanceResponse>
+  Logic: Admin view of all instances (same as regular query but for admin dashboard)
+```
+
+### BPMN XML API
+
+Add endpoint to serve BPMN XML for visualization:
+
+```
+GET /api/bpmn/{processDefinitionKey}
+  Path Param: processDefinitionKey
+  Response: BPMN XML (text/xml)
+  Logic:
+    1. Get WorkflowVersion by processDefinitionKey
+    2. If bpmnXml stored in DB, return it
+    3. Otherwise, fetch from Camunda RepositoryService
+  Error Handling: 404 if not found
+```
+
+### Frontend Services
+
+**services/adminService.ts**:
+```typescript
+completeStepAsAdmin(
+  instanceId: number, 
+  decision: string, 
+  reason: string, 
+  adminUserId: string
+): Promise<void>
+
+moveWorkflowToStep(
+  instanceId: number, 
+  targetStepKey: string, 
+  reason: string, 
+  adminUserId: string
+): Promise<void>
+
+cancelWorkflow(
+  instanceId: number, 
+  reason: string, 
+  adminUserId: string
+): Promise<void>
+
+getAuditTrail(instanceId: number): Promise<AuditTrailResponse>
+```
+
+**services/workflowService.ts**:
+```typescript
+getWorkflowInstances(filters?: WorkflowFilters, page?: number, size?: number): Promise<Page<WorkflowInstance>>
+
+getWorkflowInstance(id: number): Promise<WorkflowInstance>
+
+getBpmnXml(processDefinitionKey: string): Promise<string>
+```
+
+### Routing
+
+**App.tsx** - Set up React Router:
+```typescript
+<Routes>
+  <Route path="/" element={<AdminDashboard />} />
+  <Route path="/workflows" element={<WorkflowInstanceList />} />
+  <Route path="/workflows/:id" element={<WorkflowInstanceDetail />} />
+  <Route path="/workflows/:id/form" element={<DynamicFormRenderer />} />
+  <Route path="/audit/:id" element={<AuditTrailViewer />} />
+</Routes>
+```
+
+### Testing Requirements
+
+#### Backend Unit Tests
+
+**AdminServiceTest**:
+- testCompleteStepAsAdmin()
+- testMoveWorkflowToStep()
+- testCancelWorkflow()
+- testManualOverrideRecordedInHistory()
+
+#### Backend Integration Tests
+
+**AdminIntegrationTest**:
+- testAdminCompleteStepViaApi()
+- testAdminMoveWorkflowViaApi()
+- testAdminCancelWorkflowViaApi()
+- testAuditTrailIncludesManualOverrides()
+
+#### Frontend Unit Tests
+
+**BpmnViewer.test.tsx**:
+- renders BPMN diagram
+- highlights current step
+- shows completed steps in green
+
+**ManualOverride.test.tsx**:
+- shows confirmation modal before action
+- requires reason input
+- calls correct API endpoint
+- shows success message
+
+### Acceptance Criteria for Phase 3
+
+- [ ] Admin dashboard displays workflow statistics
+- [ ] BPMN diagram renders correctly using bpmn-js
+- [ ] Current step highlighted in diagram
+- [ ] Completed steps shown in green
+- [ ] Workflow instance list shows all instances with filters
+- [ ] Workflow instance detail page shows complete information
+- [ ] Admin can manually complete step
+- [ ] Admin can move workflow to different step
+- [ ] Admin can cancel workflow
+- [ ] All admin actions require confirmation and reason
+- [ ] Audit trail shows all actions including manual overrides
+- [ ] Audit trail shows field-level changes
+- [ ] All admin actions recorded in history with isManualOverride=true
+- [ ] UI is responsive and works on mobile
+- [ ] Unit tests pass
+- [ ] Integration tests pass
+
+---
+
+## Phase 4: Polish & Testing
+
+### Goals
+- Complete stub services with TODO comments
+- Add comprehensive error handling
+- Implement retry logic
+- Write comprehensive tests
+- Add API documentation
+- Create developer documentation
+
+### Error Handling
+
+#### Global Exception Handler
+
+**exception/GlobalExceptionHandler.java**:
+```java
+@RestControllerAdvice
+class GlobalExceptionHandler {
+  
+  @ExceptionHandler(WorkflowException.class)
+  handleWorkflowException(WorkflowException ex): ResponseEntity<ErrorResponse>
+    - Return 400 Bad Request
+    - Include error message and code
+  
+  @ExceptionHandler(NotFoundException.class)
+  handleNotFoundException(NotFoundException ex): ResponseEntity<ErrorResponse>
+    - Return 404 Not Found
+  
+  @ExceptionHandler(ValidationException.class)
+  handleValidationException(ValidationException ex): ResponseEntity<ValidationErrorResponse>
+    - Return 422 Unprocessable Entity
+    - Include field-level validation errors
+  
+  @ExceptionHandler(Exception.class)
+  handleGenericException(Exception ex): ResponseEntity<ErrorResponse>
+    - Log full stack trace
+    - Return 500 Internal Server Error
+    - Don't expose internal details to client
+}
+```
+
+#### Custom Exceptions
+
+```java
+WorkflowException extends RuntimeException
+  - Use for workflow-specific errors
+  - Include error code
+
+ValidationException extends RuntimeException
+  - Include map of field errors
+  
+NotFoundException extends RuntimeException
+  - Use for resource not found errors
+```
+
+### Retry Logic
+
+For operations that might fail temporarily:
+
+```java
+@Service
+class BpmnDeploymentService {
+  
+  @Retryable(
+    value = {CamundaDeploymentException.class},
+    maxAttempts = 3,
+    backoff = @Backoff(delay = 1000, multiplier = 2)
+  )
+  String deployBpmn(String bpmnXml, String processDefinitionKey) {
+    // Deploy to Camunda
+    // If fails, retry up to 3 times with exponential backoff
+  }
+  
+  @Recover
+  String recoverFromDeploymentFailure(CamundaDeploymentException ex, String bpmnXml, String key) {
+    // After 3 failed attempts, send email to admin
+    emailService.sendAdminAlert("BPMN deployment failed after retries", ex.getMessage());
+    throw new WorkflowException("Failed to deploy BPMN after 3 attempts", ex);
+  }
+}
+```
+
+### Stub Services - Final Implementation
+
+#### ContactService.java
+
+```java
+@Service
+@Slf4j
+public class ContactService {
+  
+  @Autowired
+  private ContactRepository contactRepository;
+  
+  @Autowired
+  private UserRepository userRepository;
+  
+  /**
+   * Get contacts for a business object by role.
+   * 
+   * TODO: Replace with actual integration to contact management service
+   * Expected API: GET /api/contacts?objectType={type}&objectId={id}&role={role}
+   * 
+   * For production:
+   * 1. Call external contact service API
+   * 2. Handle authentication (OAuth2, API key, etc.)
+   * 3. Add caching layer (Redis) to reduce API calls
+   * 4. Implement fallback if service unavailable
+   */
+  public List<User> getContactsForBusinessObject(String objectType, String objectId, String role) {
+    log.info("Fetching contacts for {}:{} with role {}", objectType, objectId, role);
+    
+    // POC: Query from local database
+    List<Contact> contacts = contactRepository.findByBusinessObjectTypeAndBusinessObjectIdAndContactRole(
+      objectType, objectId, role
+    );
+    
+    List<Long> userIds = contacts.stream()
+      .map(Contact::getUserId)
+      .collect(Collectors.toList());
+    
+    return userRepository.findAllById(userIds);
+  }
+}
+```
+
+#### EmailService.java
+
+```java
+@Service
+@Slf4j
+public class EmailService {
+  
+  /**
+   * Send task assignment email.
+   * 
+   * TODO: Integrate with actual email service (SendGrid, AWS SES, SMTP)
+   * 
+   * For production:
+   * 1. Configure email service credentials in application.yml
+   * 2. Use email template engine (Thymeleaf, Freemarker)
+   * 3. Store templates in database (EMAIL_TEMPLATE table)
+   * 4. Support HTML and plain text versions
+   * 5. Add retry logic for failed sends
+   * 6. Queue emails for bulk sending
+   * 7. Track delivery status
+   * 
+   * Example with SendGrid:
+   *   SendGrid sg = new SendGrid(apiKey);
+   *   Request request = new Request();
+   *   request.setMethod(Method.POST);
+   *   request.setEndpoint("mail/send");
+   *   request.setBody(mailBody);
+   *   Response response = sg.api(request);
+   */
+  public void sendTaskAssignmentEmail(String toEmail, String taskName, String workflowId) {
+    log.info("EMAIL NOTIFICATION:");
+    log.info("  To: {}", toEmail);
+    log.info("  Subject: New task assigned: {}", taskName);
+    log.info("  Body: You have been assigned a new task '{}' for workflow {}", taskName, workflowId);
+    log.info("  Action: Please log in to the workflow system to complete this task.");
+    
+    // TODO: Send actual email
+  }
+  
+  /**
+   * Send decision notification email.
+   */
+  public void sendDecisionEmail(String toEmail, String decision, String workflowId) {
+    log.info("EMAIL NOTIFICATION:");
+    log.info("  To: {}", toEmail);
+    log.info("  Subject: Workflow {} - Decision: {}", workflowId, decision);
+    log.info("  Body: Your workflow {} has been {}.", workflowId, decision.toLowerCase());
+    
+    // TODO: Send actual email
+  }
+  
+  /**
+   * Send admin alert email.
+   */
+  public void sendAdminAlert(String subject, String message) {
+    log.error("ADMIN ALERT:");
+    log.error("  Subject: {}", subject);
+    log.error("  Message: {}", message);
+    
+    // TODO: Send email to admin distribution list
+  }
+}
+```
+
+#### UserService.java
+
+```java
+@Service
+@Slf4j
+public class UserService {
+  
+  @Autowired
+  private UserRepository userRepository;
+  
+  /**
+   * Get user by ID.
+   * 
+   * TODO: Integrate with user management service (AD, LDAP, Auth0, etc.)
+   * 
+   * For production:
+   * 1. Call user service API or directory service
+   * 2. Cache user data to reduce lookups
+   * 3. Sync users periodically
+   * 4. Handle user deactivation gracefully
+   */
+  public User getUserById(Long userId) {
+    return userRepository.findById(userId)
+      .orElseThrow(() -> new NotFoundException("User not found: " + userId));
+  }
+  
+  /**
+   * Search users by name or email.
+   * For user picker component.
+   */
+  public List<User> searchUsers(String query) {
+    // POC: Simple search in local table
+    return userRepository.findByFullNameContainingOrEmailContaining(query, query);
+    
+    // TODO: Call user directory API with proper search
+  }
+}
+```
+
+### Comprehensive Testing
+
+#### Unit Test Coverage Goals
+
+- **Services**: >85% coverage
+- **Controllers**: >80% coverage
+- **BPMN Generation**: 100% coverage (critical path)
+- **Validation**: >90% coverage
+- **Utilities**: >85% coverage
+
+#### Integration Test Scenarios
+
+**WorkflowEndToEndTest.java**:
+```java
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+@AutoConfigureMockMvc
+class WorkflowEndToEndTest {
+  
+  @Test
+  void completeWorkflowEndToEnd() {
+    // 1. Create workflow type and version
+    // 2. Deploy BPMN
+    // 3. Start workflow instance
+    // 4. Submit form at each step
+    // 5. Verify workflow completes
+    // 6. Verify all history recorded
+    // 7. Verify audit trail complete
+  }
+  
+  @Test
+  void rejectTerminatesWorkflow() {
+    // 1. Start workflow
+    // 2. Submit form with REJECT decision
+    // 3. Verify workflow status=CANCELLED
+    // 4. Verify no further tasks created
+  }
+  
+  @Test
+  void reworkGoesToPreviousStep() {
+    // 1. Start workflow, complete first two steps
+    // 2. At third step, submit with REWORK decision
+    // 3. Verify task created for previous step
+    // 4. Verify field changes recorded in audit
+  }
+  
+  @Test
+  void parallelWorkflowRequiresBothApprovals() {
+    // 1. Create parallel workflow (SPONSOR + OWNER concurrent)
+    // 2. Start workflow
+    // 3. Complete SPONSOR task
+    // 4. Verify workflow still waiting for OWNER
+    // 5. Complete OWNER task
+    // 6. Verify workflow proceeds to next step
+  }
+  
+  @Test
+  void adminOverrideWorksCorrectly() {
+    // 1. Start workflow
+    // 2. Use admin API to complete step
+    // 3. Verify step completed
+    // 4. Verify history shows isManualOverride=true
+  }
+}
+```
+
+#### Frontend E2E Tests (Optional)
+
+If time permits, add E2E tests using Playwright or Cypress:
+
+```typescript
+// tests/e2e/workflow.spec.ts
+
+test('complete workflow end-to-end', async ({ page }) => {
+  // 1. Navigate to start workflow page
+  // 2. Fill out initial form
+  // 3. Submit
+  // 4. Verify workflow instance created
+  // 5. Navigate to task
+  // 6. Fill out approval form
+  // 7. Submit
+  // 8. Verify workflow progressed
+  // 9. Repeat for all steps
+  // 10. Verify workflow completed
+});
+
+test('conditional fields show/hide correctly', async ({ page }) => {
+  // 1. Load form
+  // 2. Select option that triggers conditional field
+  // 3. Verify field appears
+  // 4. Change selection
+  // 5. Verify field disappears
+});
+
+test('validation prevents invalid submission', async ({ page }) => {
+  // 1. Load form
+  // 2. Leave required field empty
+  // 3. Click submit
+  // 4. Verify error message shown
+  // 5. Verify form not submitted
+});
+```
+
+### API Documentation
+
+#### Swagger Annotations
+
+Add comprehensive Swagger annotations to all controllers:
+
+```java
+@RestController
+@RequestMapping("/api/workflows")
+@Tag(name = "Workflow Management", description = "APIs for managing workflows and instances")
+public class WorkflowController {
+  
+  @PostMapping("/instances/start")
+  @Operation(
+    summary = "Start a new workflow instance",
+    description = "Creates a new workflow instance and starts the Camunda process"
+  )
+  @ApiResponses({
+    @ApiResponse(responseCode = "201", description = "Workflow started successfully"),
+    @ApiResponse(responseCode = "400", description = "Invalid request"),
+    @ApiResponse(responseCode = "404", description = "Workflow type not found")
+  })
+  public ResponseEntity<WorkflowInstanceResponse> startWorkflow(
+    @RequestBody @Valid StartWorkflowRequest request
+  ) {
+    // ...
+  }
+}
+```
+
+### Developer Documentation
+
+#### README.md
+
+Create comprehensive README:
+
+```markdown
+# Workflow Engine
+
+Dynamic workflow and forms system built with Spring Boot and Camunda.
+
+## Features
+
+- Dynamic workflow configuration in database
+- Automatic BPMN generation
+- Version management for workflows
+- Dynamic form rendering with 24+ field types
+- Conditional field logic
+- Client and server-side validation
+- Admin override capabilities
+- Complete audit trail
+
+## Prerequisites
+
+- JDK 17+
+- Node.js 20+
+- Gradle 8+
+
+## Quick Start
+
+### Development Mode
+
+1. Start backend:
+```bash
+./gradlew bootRun
+```
+Backend runs on http://localhost:8080
+
+2. Start frontend (separate terminal):
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Frontend runs on http://localhost:3000 (proxies to backend)
+
+3. Access:
+- Application: http://localhost:3000
+- Swagger UI: http://localhost:8080/swagger-ui.html
+- H2 Console: http://localhost:8080/h2-console
+- Camunda Cockpit: http://localhost:8080/camunda/app/cockpit/default
+
+### Production Build
+
+Build everything:
+```bash
+./gradlew build
+```
+
+Run:
+```bash
+java -jar build/libs/workflow-engine-1.0.0.jar
+```
+
+Access: http://localhost:8080
+
+## Testing
+
+Run all tests:
+```bash
+./gradlew testAll
+```
+
+Run only unit tests:
+```bash
+./gradlew test
+```
+
+Run only integration tests:
+```bash
+./gradlew integrationTest
+```
+
+Generate coverage report:
+```bash
+./gradlew jacocoTestReport
+```
+View report: build/reports/jacoco/test/html/index.html
+
+## Database
+
+H2 in-memory database (resets on restart).
+
+Access console: http://localhost:8080/h2-console
+- JDBC URL: jdbc:h2:mem:workflowdb
+- Username: sa
+- Password: (empty)
+
+## Project Structure
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed structure.
+
+## API Documentation
+
+See Swagger UI: http://localhost:8080/swagger-ui.html
+
+## TODO for Production
+
+1. Replace H2 with PostgreSQL/MySQL
+2. Integrate contact service (see ContactService.java)
+3. Integrate email service (see EmailService.java)
+4. Add authentication/authorization (Spring Security + OAuth2)
+5. Add file upload support (S3/Azure Blob)
+6. Configure email templates in database
+7. Add monitoring (Prometheus/Grafana)
+8. Add distributed caching (Redis)
+9. Add message queue for async operations (RabbitMQ/Kafka)
+
+## License
+
+Proprietary
+```
+
+### Performance Optimization
+
+#### Database Indexing
+
+Add indexes for frequently queried columns:
+
+```sql
+CREATE INDEX idx_workflow_instance_status ON workflow_instance(status);
+CREATE INDEX idx_workflow_instance_business_object ON workflow_instance(business_object_type, business_object_id);
+CREATE INDEX idx_workflow_instance_camunda_id ON workflow_instance(camunda_process_instance_id);
+CREATE INDEX idx_form_field_section ON form_field(form_section_id);
+CREATE INDEX idx_form_submission_instance ON form_submission(workflow_instance_id);
+```
+
+#### Caching
+
+Add caching for frequently accessed data:
+
+```java
+@Service
+public class FormService {
+  
+  @Cacheable(value = "formDefinitions", key = "#stepId")
+  public FormDefinitionResponse getFormDefinitionForStep(Long stepId) {
+    // Cached for 1 hour
+  }
+}
+
+@Configuration
+@EnableCaching
+public class CacheConfig {
+  
+  @Bean
+  public CacheManager cacheManager() {
+    SimpleCacheManager cacheManager = new SimpleCacheManager();
+    cacheManager.setCaches(Arrays.asList(
+      new ConcurrentMapCache("formDefinitions"),
+      new ConcurrentMapCache("workflowTypes")
+    ));
+    return cacheManager;
+  }
+}
+```
+
+### Acceptance Criteria for Phase 4
+
+- [ ] All stub services have TODO comments explaining production integration
+- [ ] Global exception handler catches all exceptions
+- [ ] Custom exceptions used appropriately
+- [ ] Retry logic implemented for BPMN deployment
+- [ ] Unit test coverage >80%
+- [ ] Integration tests cover all major scenarios
+- [ ] All APIs have Swagger documentation
+- [ ] README.md complete with setup instructions
+- [ ] Code follows consistent style
+- [ ] No compiler warnings
+- [ ] All TODOs documented
+- [ ] Performance acceptable for POC (forms load <2s, workflows complete <1s)
+
+---
+
+## Testing Strategy
+
+### Test Pyramid
+
+```
+        /\
+       /E2E\         <- Few (optional for POC)
+      /------\
+     /  API   \      <- Some (integration tests)
+    /----------\
+   /Unit Tests  \    <- Many (comprehensive unit tests)
+  /--------------\
+```
+
+### Unit Testing Guidelines
+
+1. **Test in isolation** - Mock all dependencies
+2. **Fast execution** - All unit tests should complete in <30s
+3. **One assertion per test** - Or closely related assertions
+4. **Descriptive names** - test should clearly describe what is being tested
+5. **AAA pattern** - Arrange, Act, Assert
+
+Example:
+```java
+@Test
+void shouldThrowExceptionWhenWorkflowVersionNotFound() {
+  // Arrange
+  when(workflowVersionRepository.findById(999L)).thenReturn(Optional.empty());
+  
+  // Act & Assert
+  assertThrows(WorkflowException.class, () -> bpmnGenerationService.generateBpmn(999L));
+}
+```
+
+### Integration Testing Guidelines
+
+1. **Test with real Spring context** - Use @SpringBootTest
+2. **Use test data** - Load from test-data.sql
+3. **Clean between tests** - @Sql to reset state
+4. **Test full flows** - From API endpoint through database
+5. **Verify Camunda integration** - Actually deploy and execute processes
+
+### Frontend Testing Guidelines
+
+1. **Component tests** - Test each component in isolation
+2. **Mock API calls** - Use MSW or similar
+3. **Test user interactions** - Simulate clicks, inputs
+4. **Test conditional rendering** - Verify show/hide logic
+5. **Accessibility** - Test with screen reader queries
+
+---
+
+## API Documentation
+
+### Complete API Reference
+
+#### Workflow APIs
+
+##### Create Workflow Type
+```
+POST /api/workflows/types
+Content-Type: application/json
+
+{
+  "name": "Purchase Request Approval",
+  "description": "Standard purchase request workflow"
+}
+
+Response: 201 Created
+{
+  "id": 1,
+  "name": "Purchase Request Approval",
+  "description": "Standard purchase request workflow",
+  "currentVersionId": null,
+  "createdAt": "2024-01-15T10:00:00Z"
+}
+```
+
+##### Create Workflow Version
+```
+POST /api/workflows/types/1/versions
+Content-Type: application/json
+
+{
+  "steps": [
+    {
+      "stepKey": "DRAFT",
+      "stepName": "Draft",
+      "stepOrder": 1,
+      "stepType": "USER_TASK",
+      "assigneeType": "REQUESTOR"
+    },
+    {
+      "stepKey": "SPONSOR_APPROVED",
+      "stepName": "Sponsor Approval",
+      "stepOrder": 2,
+      "stepType": "USER_TASK",
+      "assigneeType": "CONTACT_ROLE",
+      "assigneeValue": "SPONSOR"
+    }
+  ],
+  "conditions": [
+    {
+      "fromStepKey": "DRAFT",
+      "toStepKey": "SPONSOR_APPROVED",
+      "conditionType": "SEQUENTIAL"
+    }
+  ]
+}
+
+Response: 201 Created
+{
+  "id": 1,
+  "workflowTypeId": 1,
+  "versionNumber": 1,
+  "status": "DRAFT",
+  "createdAt": "2024-01-15T10:05:00Z"
+}
+```
+
+##### Deploy Workflow
+```
+POST /api/workflows/types/1/versions/1/deploy
+
+Response: 200 OK
+{
+  "deploymentId": "abc123",
+  "processDefinitionKey": "purchase-request-v1",
+  "status": "ACTIVE"
+}
+```
+
+##### Start Workflow Instance
+```
+POST /api/workflows/instances/start
+Content-Type: application/json
+
+{
+  "workflowTypeId": 1,
+  "businessObjectType": "PURCHASE_REQUEST",
+  "businessObjectId": "PR-001",
+  "startedByUserId": "user1"
+}
+
+Response: 201 Created
+{
+  "id": 1,
+  "workflowTypeId": 1,
+  "workflowVersionId": 1,
+  "camundaProcessInstanceId": "proc-123",
+  "businessObjectType": "PURCHASE_REQUEST",
+  "businessObjectId": "PR-001",
+  "currentStepKey": "DRAFT",
+  "status": "IN_PROGRESS",
+  "startedAt": "2024-01-15T10:10:00Z"
+}
+```
+
+##### Complete Step
+```
+POST /api/workflows/instances/1/complete
+Content-Type: application/json
+
+{
+  "action": "APPROVE",
+  "comments": "Looks good, approved",
+  "actorUserId": "user2"
+}
+
+Response: 204 No Content
+```
+
+##### Get Workflow Instance
+```
+GET /api/workflows/instances/1
+
+Response: 200 OK
+{
+  "id": 1,
+  "workflowType": {...},
+  "workflowVersion": {...},
+  "currentStepKey": "SPONSOR_APPROVED",
+  "status": "IN_PROGRESS",
+  "startedAt": "2024-01-15T10:10:00Z",
+  "history": [
+    {
+      "stepKey": "DRAFT",
+      "action": "STARTED",
+      "actorUserName": "Alice Smith",
+      "createdAt": "2024-01-15T10:10:00Z"
+    },
+    {
+      "stepKey": "DRAFT",
+      "action": "COMPLETED",
+      "actorUserName": "Alice Smith",
+      "comments": "Initial draft completed",
+      "createdAt": "2024-01-15T10:15:00Z"
+    }
+  ]
+}
+```
+
+##### Query Workflow Instances
+```
+GET /api/workflows/instances?workflowTypeId=1&status=IN_PROGRESS&page=0&size=20
+
+Response: 200 OK
+{
+  "content": [...],
+  "totalElements": 45,
+  "totalPages": 3,
+  "number": 0,
+  "size": 20
+}
+```
+
+#### Form APIs
+
+##### Get Form Definition
+```
+GET /api/forms/definition/3
+
+Response: 200 OK
+{
+  "formKey": "sponsor-approval-form-v1",
+  "formName": "Sponsor Approval Form",
+  "sections": [
+    {
+      "sectionKey": "approval_decision",
+      "sectionTitle": "Approval Decision",
+      "fields": [
+        {
+          "fieldKey": "decision",
+          "fieldLabel": "Your Decision",
+          "fieldType": "RADIO",
+          "isRequired": true,
+          "options": [
+            {"value": "APPROVE", "label": "Approve"},
+            {"value": "REJECT", "label": "Reject"},
+            {"value": "REWORK", "label": "Request Changes"}
+          ],
+          "validations": [],
+          "conditions": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+##### Get Form with Data
+```
+GET /api/forms/instance/1
+
+Response: 200 OK
+{
+  "formDefinition": {...},
+  "existingData": {
+    "decision": "APPROVE",
+    "comments": "Previously saved draft"
+  }
+}
+```
+
+##### Submit Form
+```
+POST /api/forms/submit
+Content-Type: application/json
+
+{
+  "workflowInstanceId": 1,
+  "formData": {
+    "decision": "APPROVE",
+    "comments": "All requirements met, approved",
+    "budget_verified": true
+  },
+  "actorUserId": "user2"
+}
+
+Response: 204 No Content
+```
+
+##### Save Draft
+```
+POST /api/forms/draft
+Content-Type: application/json
+
+{
+  "workflowInstanceId": 1,
+  "formData": {
+    "decision": "APPROVE",
+    "comments": "Draft in progress..."
+  }
+}
+
+Response: 204 No Content
+```
+
+#### Admin APIs
+
+##### Complete Step As Admin
+```
+POST /api/admin/workflows/1/complete
+Content-Type: application/json
+
+{
+  "decision": "APPROVE",
+  "reason": "Original assignee on leave, completing on their behalf",
+  "adminUserId": "admin1"
+}
+
+Response: 204 No Content
+```
+
+##### Move Workflow to Step
+```
+POST /api/admin/workflows/1/move
+Content-Type: application/json
+
+{
+  "targetStepKey": "MANAGER_APPROVED",
+  "reason": "Skipping sponsor approval per executive decision",
+  "adminUserId": "admin1"
+}
+
+Response: 204 No Content
+```
+
+##### Cancel Workflow
+```
+POST /api/admin/workflows/1/cancel
+Content-Type: application/json
+
+{
+  "reason": "Request withdrawn by requestor",
+  "adminUserId": "admin1"
+}
+
+Response: 204 No Content
+```
+
+##### Get Audit Trail
+```
+GET /api/admin/audit/1
+
+Response: 200 OK
+{
+  "workflowInstanceId": 1,
+  "entries": [
+    {
+      "timestamp": "2024-01-15T10:10:00Z",
+      "type": "WORKFLOW_STEP",
+      "action": "STARTED",
+      "stepKey": "DRAFT",
+      "actorUserName": "Alice Smith",
+      "isManualOverride": false
+    },
+    {
+      "timestamp": "2024-01-15T10:15:00Z",
+      "type": "FORM_SUBMISSION",
+      "action": "SUBMITTED",
+      "stepKey": "DRAFT",
+      "actorUserName": "Alice Smith",
+      "submittedData": {...}
+    },
+    {
+      "timestamp": "2024-01-15T10:20:00Z",
+      "type": "WORKFLOW_STEP",
+      "action": "MANUAL_OVERRIDE",
+      "stepKey": "SPONSOR_APPROVED",
+      "actorUserName": "Admin User",
+      "isManualOverride": true,
+      "reason": "Expedited approval requested"
+    }
+  ]
+}
+```
+
+---
+
+## Development Workflow
+
+### Daily Development Process
+
+1. **Pull latest code**
+```bash
+git pull origin main
+```
+
+2. **Start backend** (Terminal 1)
+```bash
+./gradlew bootRun
+```
+
+3. **Start frontend** (Terminal 2)
+```bash
+cd frontend
+npm run dev
+```
+
+4. **Make changes**
+   - Backend: Edit Java files
+   - Frontend: Edit TypeScript/React files
+   - Spring Boot DevTools auto-restarts on changes
+   - Vite hot-reloads on changes
+
+5. **Run tests**
+```bash
+./gradlew test           # Unit tests
+./gradlew integrationTest # Integration tests
+cd frontend && npm test   # Frontend tests
+```
+
+6. **Check coverage**
+```bash
+./gradlew jacocoTestReport
+open build/reports/jacoco/test/html/index.html
+```
+
+7. **Build for deployment**
+```bash
+./gradlew build
+```
+
+### Git Workflow
+
+```bash
+# Create feature branch
+git checkout -b feature/dynamic-forms
+
+# Make changes and commit
+git add .
+git commit -m "Implement dynamic form rendering"
+
+# Push and create PR
+git push origin feature/dynamic-forms
+```
+
+### Debugging
+
+#### Backend Debugging
+
+1. Run with debug enabled:
+```bash
+./gradlew bootRun --debug-jvm
+```
+
+2. Attach debugger to port 5005
+
+3. Set breakpoints in IntelliJ/Eclipse
+
+#### Frontend Debugging
+
+1. Use Chrome DevTools
+2. React DevTools extension
+3. Console logs
+4. Breakpoints in Sources tab
+
+#### Camunda Debugging
+
+1. Access Camunda Cockpit: http://localhost:8080/camunda/app/cockpit/default
+2. Username: admin, Password: admin
+3. View running processes
+4. Inspect process variables
+5. View incident reports
+
+### Common Issues and Solutions
+
+**Issue**: H2 database data lost on restart
+**Solution**: Expected behavior for in-memory DB. For persistence, switch to file-based: `jdbc:h2:file:./data/workflowdb`
+
+**Issue**: React app not loading
+**Solution**: Check if both backend (8080) and frontend (3000) are running. Check proxy configuration in vite.config.ts
+
+**Issue**: BPMN deployment fails
+**Solution**: Check BPMN XML validity. Use Camunda Modeler to validate. Check server logs for detailed error
+
+**Issue**: Form validation not working
+**Solution**: Check browser console for errors. Verify validation rules in database. Check that field conditions are correctly evaluated
+
+**Issue**: Camunda task not found
+**Solution**: Verify process instance exists in Camunda. Check that step key matches user task ID in BPMN
+
+**Issue**: Camunda web interface not accessible (404 error)
+**Solution**: 
+1. Verify `camunda-bpm-spring-boot-starter-webapp` dependency is in build.gradle
+2. Check application logs for Camunda webapp deployment messages
+3. Ensure application.yml has `camunda.bpm.webapp.index-redirect-enabled: true`
+4. Access full path: http://localhost:8080/camunda/app/cockpit/default/
+5. Check if other endpoints work (Swagger, H2 console) to verify application started correctly
+
+**Issue**: Cannot login to Camunda (admin/admin not working)
+**Solution**: 
+1. Verify `camunda.bpm.admin-user.id` and `password` in application.yml
+2. Check logs for user creation messages
+3. Try accessing H2 console and check `ACT_ID_USER` table for admin user
+4. If user doesn't exist, Camunda may not have initialized properly - check startup logs
+
+**Issue**: Process definition not visible in Camunda Cockpit
+**Solution**:
+1. Verify BPMN was deployed successfully (check logs)
+2. Check `ACT_RE_PROCDEF` table in H2 console
+3. Verify deployment ID stored in workflow_version table
+4. Try redeploying via API endpoint
+5. Check BPMN XML is valid using Camunda Modeler
+
+**Issue**: Tasks not appearing in Camunda Tasklist
+**Solution**:
+1. Verify process instance is running (check Cockpit)
+2. Verify user task exists in current process execution (Cockpit → Process Instances → Activity Instance Tree)
+3. Check task assignee/candidate configuration
+4. Query `ACT_RU_TASK` table in H2 console to see active tasks
+5. Verify task assignment logic in workflow service
+
+---
+
+## Appendices
+
+### Appendix A: Field Type Configuration Reference
+
+Complete configuration options for each field type:
+
+#### TEXT
+```json
+{
+  "maxLength": 100,
+  "minLength": 5,
+  "pattern": "^[A-Z][a-z]+$",
+  "placeholder": "Enter your name",
+  "prefix": "$",
+  "suffix": "USD"
+}
+```
+
+#### NUMBER
+```json
+{
+  "min": 0,
+  "max": 1000000,
+  "step": 0.01,
+  "decimals": 2,
+  "prefix": "$",
+  "suffix": "USD",
+  "thousandsSeparator": ","
+}
+```
+
+#### DATE
+```json
+{
+  "minDate": "2024-01-01",
+  "maxDate": "2024-12-31",
+  "format": "YYYY-MM-DD",
+  "defaultToToday": true
+}
+```
+
+#### RADIO/CHECKBOX/DROPDOWN
+```json
+{
+  "options": [...],  // Stored in form_field_option table
+  "allowOther": true,
+  "otherLabel": "Other (please specify)"
+}
+```
+
+#### TABLE
+```json
+{
+  "columns": [
+    {
+      "key": "item",
+      "label": "Item Name",
+      "type": "TEXT",
+      "required": true
+    },
+    {
+      "key": "quantity",
+      "label": "Quantity",
+      "type": "NUMBER",
+      "required": true
+    }
+  ],
+  "minRows": 1,
+  "maxRows": 10,
+  "allowAdd": true,
+  "allowDelete": true
+}
+```
+
+#### USER_PICKER
+```json
+{
+  "multiple": false,
+  "filterByRole": "APPROVER",
+  "filterByDepartment": "ENGINEERING"
+}
+```
+
+### Appendix B: Validation Types Reference
+
+All supported validation types:
+
+1. **REQUIRED** - Field must have value
+2. **MIN** - Minimum numeric value
+3. **MAX** - Maximum numeric value
+4. **MIN_LENGTH** - Minimum string length
+5. **MAX_LENGTH** - Maximum string length
+6. **PATTERN** - Regex pattern match
+7. **EMAIL** - Valid email format
+8. **URL** - Valid URL format
+9. **PHONE** - Valid phone format
+10. **DATE_RANGE** - Date within range
+11. **CROSS_FIELD** - Custom validation across multiple fields
+
+### Appendix C: Conditional Operators Reference
+
+All supported conditional operators:
+
+1. **EQUALS** - `value === comparisonValue`
+2. **NOT_EQUALS** - `value !== comparisonValue`
+3. **GREATER_THAN** - `value > comparisonValue`
+4. **GREATER_THAN_OR_EQUAL** - `value >= comparisonValue`
+5. **LESS_THAN** - `value < comparisonValue`
+6. **LESS_THAN_OR_EQUAL** - `value <= comparisonValue`
+7. **IN** - `comparisonValue.includes(value)`
+8. **NOT_IN** - `!comparisonValue.includes(value)`
+9. **CONTAINS** - `value.includes(comparisonValue)`
+10. **NOT_CONTAINS** - `!value.includes(comparisonValue)`
+11. **IS_EMPTY** - `!value || value.length === 0`
+12. **IS_NOT_EMPTY** - `value && value.length > 0`
+
+### Appendix D: Database Schema Diagram
+
+```
+WORKFLOW_TYPE
+    │
+    ├─── WORKFLOW_VERSION
+    │       │
+    │       └─── WORKFLOW_STEP
+    │               │
+    │               ├─── WORKFLOW_STEP_CONDITION
+    │               └─── FORM_DEFINITION
+    │                       │
+    │                       └─── FORM_SECTION
+    │                               │
+    │                               └─── FORM_FIELD
+    │                                       │
+    │                                       ├─── FORM_FIELD_OPTION
+    │                                       ├─── FORM_FIELD_VALIDATION
+    │                                       └─── FORM_FIELD_CONDITION
+    │
+    └─── WORKFLOW_INSTANCE
+            │
+            ├─── WORKFLOW_INSTANCE_HISTORY
+            ├─── FORM_SUBMISSION
+            │       │
+            │       └─── FORM_FIELD_RESPONSE
+            │
+            └─── FORM_FIELD_AUDIT
+
+USER
+    │
+    └─── CONTACT
+```
+
+### Appendix E: BPMN Generation Examples
+
+**Example 1: Simple Sequential Workflow**
+```
+Input (Database):
+  Steps: DRAFT → SUBMITTED → APPROVED → END
+  Conditions: All SEQUENTIAL
+
+Output (BPMN):
+  StartEvent → UserTask(DRAFT) → UserTask(SUBMITTED) → UserTask(APPROVED) → EndEvent
+```
+
+**Example 2: Parallel Workflow**
+```
+Input (Database):
+  Steps: SUBMITTED → SPONSOR_APPROVED, OWNER_APPROVED (parallel) → MANAGER_APPROVED → END
+  Conditions: 
+    - SUBMITTED → SPONSOR_APPROVED (PARALLEL_FORK)
+    - SUBMITTED → OWNER_APPROVED (PARALLEL_FORK)
+    - SPONSOR_APPROVED → MANAGER_APPROVED (PARALLEL_JOIN)
+    - OWNER_APPROVED → MANAGER_APPROVED (PARALLEL_JOIN)
+
+Output (BPMN):
+  StartEvent → UserTask(SUBMITTED) → ParallelGateway(Fork) 
+    → [UserTask(SPONSOR_APPROVED), UserTask(OWNER_APPROVED)] 
+    → ParallelGateway(Join) → UserTask(MANAGER_APPROVED) → EndEvent
+```
+
+### Appendix F: Sample curl Commands
+
+Useful curl commands for testing:
+
+```bash
+# Create workflow type
+curl -X POST http://localhost:8080/api/workflows/types \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Leave Request","description":"Employee leave approval"}'
+
+# Start workflow
+curl -X POST http://localhost:8080/api/workflows/instances/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflowTypeId":1,
+    "businessObjectType":"LEAVE_REQUEST",
+    "businessObjectId":"LR-001",
+    "startedByUserId":"alice"
+  }'
+
+# Get workflow instance
+curl http://localhost:8080/api/workflows/instances/1
+
+# Submit form
+curl -X POST http://localhost:8080/api/forms/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflowInstanceId":1,
+    "formData":{"decision":"APPROVE","comments":"Approved"},
+    "actorUserId":"bob"
+  }'
+
+# Admin override
+curl -X POST http://localhost:8080/api/admin/workflows/1/complete \
+  -H "Content-Type: application/json" \
+  -d '{
+    "decision":"APPROVE",
+    "reason":"Expedited approval",
+    "adminUserId":"admin"
+  }'
+```
+
+### Appendix G: Environment Variables
+
+Configuration via environment variables (for production):
+
+```bash
+# Database
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/workflowdb
+SPRING_DATASOURCE_USERNAME=dbuser
+SPRING_DATASOURCE_PASSWORD=dbpass
+
+# Camunda
+CAMUNDA_BPM_ADMIN_USER_ID=admin
+CAMUNDA_BPM_ADMIN_USER_PASSWORD=securepassword
+
+# Email (when implemented)
+MAIL_HOST=smtp.sendgrid.net
+MAIL_PORT=587
+MAIL_USERNAME=apikey
+MAIL_PASSWORD=your_sendgrid_api_key
+
+# External Services (when implemented)
+CONTACT_SERVICE_URL=https://api.company.com/contacts
+CONTACT_SERVICE_API_KEY=your_api_key
+
+USER_SERVICE_URL=https://api.company.com/users
+USER_SERVICE_API_KEY=your_api_key
+```
+
+### Appendix H: Deployment Checklist
+
+Before deploying to production:
+
+- [ ] Replace H2 with production database (PostgreSQL/MySQL)
+- [ ] Configure database connection pooling
+- [ ] Set up database backups
+- [ ] Implement contact service integration
+- [ ] Implement user service integration
+- [ ] Implement email service integration
+- [ ] Add authentication/authorization (Spring Security)
+- [ ] Configure HTTPS/TLS
+- [ ] Set up logging (centralized, structured)
+- [ ] Set up monitoring (Prometheus, Grafana)
+- [ ] Set up alerting (PagerDuty, Slack)
+- [ ] Configure file upload storage (S3, Azure Blob)
+- [ ] Add rate limiting on APIs
+- [ ] Configure CORS properly
+- [ ] Set up CI/CD pipeline
+- [ ] Perform load testing
+- [ ] Perform security testing
+- [ ] Create runbook for operations
+- [ ] Train support team
+- [ ] Prepare rollback plan
+
+### Appendix I: Performance Benchmarks (POC Targets)
+
+Expected performance for POC:
+
+- **Workflow creation**: < 500ms
+- **BPMN generation**: < 1s
+- **Workflow start**: < 500ms
+- **Form load**: < 1s
+- **Form submit**: < 500ms
+- **Admin override**: < 500ms
+- **Query workflows (20 results)**: < 500ms
+- **Audit trail load**: < 1s
+
+Database records for testing:
+- 10 workflow types
+- 50 workflow instances
+- 200 form submissions
+- Should handle without performance degradation
+
+---
+
+## Implementation Checklist
+
+### Phase 1: Core Workflow Engine
+- [ ] Gradle project setup with Spring Boot
+- [ ] Node Gradle plugin configured
+- [ ] H2 database configuration
+- [ ] Camunda embedded engine setup
+- [ ] Database schema (workflow tables) created
+- [ ] Sample data loaded
+- [ ] Entity classes implemented
+- [ ] Repository interfaces created
+- [ ] BpmnGenerationService implemented
+- [ ] WorkflowService implemented
+- [ ] ContactService stub implemented
+- [ ] EmailService stub implemented
+- [ ] WorkflowController implemented
+- [ ] Exception handling configured
+- [ ] OpenAPI/Swagger configured
+- [ ] Unit tests written and passing
+- [ ] Integration tests written and passing
+- [ ] Can generate BPMN for sequential workflow
+- [ ] Can generate BPMN for parallel workflow
+- [ ] Can deploy BPMN to Camunda
+- [ ] Can start workflow instance
+- [ ] Can complete workflow steps
+- [ ] Workflow history recorded correctly
+
+### Phase 2: Dynamic Forms System
+- [ ] Database schema (form tables) created
+- [ ] Sample form configured in database
+- [ ] Form entity classes implemented
+- [ ] FormService implemented
+- [ ] ValidationService implemented
+- [ ] ConditionalLogicService implemented
+- [ ] FormController implemented
+- [ ] React project setup with Vite
+- [ ] TailwindCSS configured
+- [ ] React Router configured
+- [ ] API service layer implemented
+- [ ] DynamicFormRenderer component implemented
+- [ ] All 24 field type components implemented
+- [ ] Conditional logic utility implemented
+- [ ] Validation utility implemented
+- [ ] Form submission integrated with Camunda
+- [ ] Draft save functionality working
+- [ ] Field-level audit for rework working
+- [ ] Unit tests written and passing
+- [ ] Integration tests written and passing
+- [ ] Frontend tests written and passing
+- [ ] Forms render correctly in browser
+- [ ] Conditional fields show/hide correctly
+- [ ] Validation works on client and server
+
+### Phase 3: Admin UI & Visualization
+- [ ] bpmn-js installed and configured
+- [ ] BpmnViewer component implemented
+- [ ] WorkflowInstanceList component implemented
+- [ ] WorkflowInstanceDetail component implemented
+- [ ] ManualOverride component implemented
+- [ ] AuditTrailViewer component implemented
+- [ ] AdminDashboard component implemented
+- [ ] AdminService implemented
+- [ ] AdminController implemented
+- [ ] BPMN XML endpoint implemented
+- [ ] Routing configured
+- [ ] Admin can view BPMN diagram
+- [ ] Current step highlighted in diagram
+- [ ] Admin can manually complete step
+- [ ] Admin can move workflow to any step
+- [ ] Admin can cancel workflow
+- [ ] Manual overrides recorded in audit
+- [ ] Unit tests written and passing
+- [ ] Integration tests written and passing
+- [ ] UI is responsive
+
+### Phase 4: Polish & Testing
+- [ ] All stub services have TODO comments
+- [ ] Global exception handler implemented
+- [ ] Retry logic added for deployments
+- [ ] Database indexes created
+- [ ] Caching configured
+- [ ] All controllers have Swagger annotations
+- [ ] README.md written
+- [ ] ARCHITECTURE.md written
+- [ ] Code coverage >80%
+- [ ] All integration tests passing
+- [ ] No compiler warnings
+- [ ] Code formatted consistently
+- [ ] All TODOs documented
+- [ ] Build passes cleanly
+- [ ] Application starts without errors
+- [ ] H2 console accessible
+- [ ] Camunda Cockpit accessible
+- [ ] Swagger UI accessible and complete
+- [ ] End-to-end workflow test passes
+
+---
+
+## Final Notes for Devin
+
+### Code Quality Standards
+
+1. **Follow Java naming conventions**
+   - Classes: PascalCase
+   - Methods/variables: camelCase
+   - Constants: UPPER_SNAKE_CASE
+
+2. **Use Lombok annotations**
+   - @Data for simple DTOs
+   - @Builder for complex objects
+   - @Slf4j for logging
+
+3. **Use MapStruct for DTO mapping**
+   - Don't write manual mapping code
+   - Define @Mapper interfaces
+
+4. **Write meaningful commit messages**
+   - "feat: Add dynamic form rendering"
+   - "fix: Correct validation for date fields"
+   - "test: Add integration tests for workflow service"
+
+5. **Add JavaDoc for public methods**
+   - Especially service layer methods
+   - Explain parameters and return values
+
+6. **Use constants instead of magic numbers/strings**
+   ```java
+   public class WorkflowConstants {
+     public static final String STATUS_IN_PROGRESS = "IN_PROGRESS";
+     public static final int MAX_RETRY_ATTEMPTS = 3;
+   }
+   ```
+
+### Testing Best Practices
+
+1. **Test happy path AND edge cases**
+2. **Use descriptive test names** - testShouldThrowExceptionWhenWorkflowNotFound()
+3. **Don't test getters/setters** - Focus on business logic
+4. **Use @BeforeEach for test setup** - Keep tests DRY
+5. **Assert one thing per test** - Or closely related things
+6. **Use test data builders** for complex objects
+
+### Common Pitfalls to Avoid
+
+1. **DON'T expose entities in REST APIs** - Always use DTOs
+2. **DON'T catch generic Exception** - Catch specific exceptions
+3. **DON'T ignore validation** - Validate all input
+4. **DON'T hardcode values** - Use configuration
+5. **DON'T skip transaction management** - Use @Transactional appropriately
+6. **DON'T forget to close resources** - Use try-with-resources
+7. **DON'T log sensitive data** - Passwords, tokens, PII
+
+### When You Get Stuck
+
+1. **Check Camunda docs**: https://docs.camunda.org/
+2. **Check Spring Boot docs**: https://docs.spring.io/spring-boot/
+3. **Check React docs**: https://react.dev/
+4. **Check bpmn-js docs**: https://bpmn.io/toolkit/bpmn-js/
+5. **Look at test files** - They show how to use the code
+6. **Check application logs** - They usually explain the error
+7. **Use H2 console** - Inspect database state
+8. **Use Camunda Cockpit** - Inspect process state
+
+### Success Criteria
+
+The POC is successful when:
+1. You can create a workflow type and version via API
+2. BPMN is auto-generated and deployed to Camunda
+3. You can start a workflow instance
+4. Forms render dynamically based on database configuration
+5. You can complete forms at each step and workflow progresses
+6. Conditional fields show/hide correctly
+7. Validation works on both client and server
+8. Admin can manually override and move workflows
+9. Complete audit trail is visible
+10. All tests pass
+11. Swagger UI shows all APIs
+12. Application is stable and usable for demo
+
+### Estimated Effort
+
+- **Phase 1**: 2-3 days
+- **Phase 2**: 3-4 days
+- **Phase 3**: 2-3 days
+- **Phase 4**: 1-2 days
+- **Total**: 8-12 days
+
+Good luck! 🚀
