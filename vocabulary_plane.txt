@@ -1,0 +1,396 @@
+In the context of AI agent building, the vocabulary plane refers to the set of actions, tools, or operations that an agent has available to it — essentially the "language" of capabilities the agent can "speak" in order to interact with its environment or accomplish tasks.
+Think of it this way: just as a human's vocabulary determines what they can express, an agent's vocabulary plane determines what it can do. It defines the action space — the discrete set of possible moves, API calls, tool invocations, or outputs the agent can produce at any given step.
+Key aspects of the vocabulary plane include:
+
+The scope of available tools (web search, code execution, file I/O, API calls, etc.), the level of abstraction of those tools (low-level primitives vs. high-level compound actions), and how that vocabulary is represented to the model (function signatures, descriptions, schemas).
+
+Why it matters in agent design:
+A narrow vocabulary plane limits what an agent can accomplish but makes it more predictable and easier to control. A broad vocabulary plane gives the agent more power and flexibility but also increases the surface area for errors or unintended behavior. Designing the right vocabulary plane is a core architectural decision — you want tools that are expressive enough to solve the target tasks, but not so open-ended that the agent can take harmful or unpredictable actions.
+In frameworks like LangChain, AutoGPT, or Claude's tool-use system, curating the vocabulary plane essentially means deciding which tools to expose to the agent and how to describe them.
+
+
+Can you give me one example - what is vocabulary plane in a let say a loan appplication
+
+Great example! Let's say you're building an AI agent that handles loan applications. Here's what the vocabulary plane would look like:
+
+The agent's vocabulary plane = the set of actions it's allowed to take
+For a loan application agent, that might be:
+
+get_credit_score(applicant_id) — pull credit bureau data
+verify_income(applicant_id) — check pay stubs or bank statements
+check_employment_status(applicant_id) — verify employer
+calculate_debt_to_income_ratio(applicant_id) — run financial math
+approve_loan(applicant_id, amount) — issue approval
+reject_loan(applicant_id, reason) — decline with reason
+request_more_documents(applicant_id, doc_type) — ask applicant for more info
+flag_for_human_review(applicant_id) — escalate to a human underwriter
+
+
+That list IS the vocabulary plane. The agent can only do those things — nothing else.
+Notice what's not in the vocabulary plane: the agent cannot send_money_directly(), cannot modify_credit_score(), cannot access_other_customers(). Those are deliberately excluded.
+
+The design insight: If you give the agent approve_loan but not flag_for_human_review, it's forced to make every decision itself. If you add flag_for_human_review, you've given it an "escape hatch" to stay safe on edge cases. That one addition meaningfully changes the agent's behavior and risk profile.
+So the vocabulary plane isn't just a technical list — it's a policy decision about what the agent is trusted to do autonomously.
+
+so this is the one exposed in tools if its needs external interface right
+
+Exactly right! When the agent needs to interact with external systems, the vocabulary plane is literally what you define in your tools/function definitions.
+For example in Claude's API, you'd expose that vocabulary plane like this:
+json{
+  "name": "approve_loan",
+  "description": "Approves a loan application for a given applicant",
+  "parameters": {
+    "applicant_id": "string",
+    "amount": "number"
+  }
+}
+That JSON definition is the agent's vocabulary for that action. The model sees those tool definitions and that becomes the boundary of what it can do.
+So to put it simply:
+
+Internal reasoning → happens in the model's context window (thinking, planning)
+Vocabulary plane → the bridge between reasoning and the outside world
+Tool definitions → the concrete implementation of that vocabulary plane in code
+
+The vocabulary plane is kind of the abstract concept, and the tool/function schema is the concrete expression of it when you actually build the system.
+This is also why tool design is so critical — when you write those tool descriptions and parameter schemas, you're literally drawing the boundaries of what your agent can and cannot do in the real world.
+
+can you tell me one function which agent can do itself without external interface and called as voc. plane
+
+Great question! One classic example:
+calculate_debt_to_income_ratio(income, total_debt)
+This is pure math — the agent can do it entirely within itself:
+debt_to_income = total_debt / income * 100
+No API call, no database, no external system. The agent just reasons and computes it internally using information already in its context.
+
+So this lives in the vocabulary plane but doesn't need a tool — the agent just does it as part of its thinking/reasoning step.
+This is actually an important distinction in agent design:
+
+Some vocabulary plane actions = internal cognitive operations (calculate, compare, summarize, decide)
+Some vocabulary plane actions = external tool calls (fetch, write, approve, notify)
+
+Both are part of what the agent "can do" — but only the external ones need an interface/tool definition. The internal ones just happen inside the model's reasoning naturally.
+
+ok sometimes it brings the data from external interface, but do the assessment internally, in this case, both tool and internal assessment are voc. plane right
+
+Exactly! You've nailed it.
+Take this flow for example:
+
+get_credit_score(applicant_id) → external tool call (fetches from credit bureau)
+assess_creditworthiness(score, threshold) → internal reasoning (agent compares and decides)
+
+Both together form the full vocabulary plane for that task.
+The agent fetches externally, then reasons internally — and the combination of both is what makes the agent capable of completing that unit of work end to end.
+So the vocabulary plane is really the complete picture of everything an agent can do — whether it reaches out to the world to get/send data, or works purely within its own reasoning. The tool definitions just happen to be the visible, explicit part that you formally declare, while the internal assessment part is more implicit — baked into the model's capability and your prompt/instructions.
+A clean way to think about it:
+
+Vocabulary plane = the full universe of what the agent can do
+Tool definitions = the explicitly declared subset that touches external systems
+Internal reasoning = the undeclared but equally real subset that happens inside the model
+
+
+can you help me without coding - how are you defining voc plane
+
+Sure! Here's how you'd define a vocabulary plane without any coding — just through thinking and design:
+
+Step 1: Define the agent's job
+What is this agent supposed to accomplish?
+
+"Process a loan application and make a recommendation"
+
+Step 2: List everything the agent needs to FETCH from outside
+What information does it need that it doesn't already have?
+
+credit score, income details, employment status, existing debts
+
+
+Step 3: List everything the agent needs to DO to the outside world
+What actions does it need to take that affect external systems?
+
+approve loan, reject loan, request documents, flag for human review
+
+
+Step 4: List everything it can REASON about internally
+What can it figure out on its own once it has the data?
+
+calculate debt-to-income ratio, assess risk level, compare against policy thresholds, decide next step
+
+
+Step 5: Draw the boundary
+Decide what it should and shouldn't be allowed to do.
+
+❌ modify credit score, access other customers, transfer money directly
+
+
+That entire exercise — no code, just thinking — is defining the vocabulary plane. You're essentially answering:
+
+"What does this agent know, what can it fetch, what can it do, and what is off limits?"
+
+The coding part comes later. The vocabulary plane is first a design decision, not a technical one.
+
+great. another question. where are we defining these in the project once identified
+
+Great question! Once you've identified your vocabulary plane, here's where each part lives in a typical project:
+
+External actions (tool calls)
+These get defined in your tool/function schema files — usually a JSON or YAML config, or a dedicated tools definition file in your codebase. This is what gets passed to the model so it knows what it can call.
+
+Internal reasoning rules
+These get defined in your system prompt — things like "if debt-to-income ratio exceeds 40%, flag for human review." You're essentially encoding your business logic and assessment rules in natural language instructions to the agent.
+
+Boundaries / what's off limits
+Also in your system prompt — "you are not allowed to approve loans above $50,000 without human review" — plus sometimes enforced at the application layer as a hard guardrail in code.
+
+Data it needs to fetch
+Defined in your tool schemas (what to call) and your backend integrations (the actual APIs/databases those tools connect to).
+
+So in summary, the vocabulary plane ends up living across three places:
+
+System prompt → reasoning rules, boundaries, behavior
+Tool definitions → external actions and data fetching
+Backend/API layer → the actual implementation behind those tools
+
+The vocabulary plane is the design, and these three artifacts are where it gets expressed in the project.
+
+let say i have an LLM model like claude - i can ask a question and it answers, i can upload a doc and it will answer - what is the difference between this and an agent
+
+Great question! This gets to the heart of what makes an agent different.
+
+What you're describing (Claude as a chatbot):
+You give input → Claude thinks → Claude gives you an answer. That's it. It's a single turn of reasoning. Claude is purely reactive — it responds and stops.
+Even if you upload a document, Claude reads it, reasons about it, and responds. Still one shot. It doesn't do anything beyond answering.
+
+An Agent:
+The agent receives a goal → plans → takes an action → looks at the result → takes another action → keeps going until the goal is achieved.
+It has a loop. It acts, observes, acts again.
+
+Concrete example:
+You ask Claude: "Is this loan application good?"
+
+Claude reads it and says "yes/no based on what I see" — chatbot
+
+You give an agent the same task:
+
+It fetches the credit score from the bureau
+Then verifies income from the payroll system
+Then calculates debt-to-income ratio
+Then checks against policy rules
+Then either approves, rejects, or flags for human review
+Agent
+
+
+The core difference in one line:
+
+A chatbot answers. An agent acts.
+
+The vocabulary plane is actually what makes something an agent — because without a vocabulary of actions, it can only answer. Once you give it tools and the ability to loop, it becomes an agent.
+
+ok now coming to coding part. dont show lots of code, need kind of pseduo code.
+for this loan example - how will you do and what is the use of langgraph here
+
+Great! Let me walk you through it conceptually with minimal pseudo code.
+
+The core idea of LangGraph:
+LangGraph lets you define your agent as a graph — where nodes are steps and edges are decisions about what to do next. This is perfect for a loan application because the flow is not always linear — it branches based on results.
+
+The Graph for Loan Application:
+START
+  ↓
+[fetch_credit_score]
+  ↓
+[fetch_income & employment]
+  ↓
+[calculate_debt_to_income]  ← internal reasoning node
+  ↓
+[assess_risk]               ← internal reasoning node
+  ↓
+  ├── low risk   → [approve_loan]
+  ├── high risk  → [reject_loan]
+  └── uncertain  → [flag_for_human_review]
+  ↓
+END
+
+In pseudo code:
+# Define nodes (each is a step in vocabulary plane)
+graph.add_node("fetch_credit_score", call_credit_bureau_tool)
+graph.add_node("fetch_income", call_payroll_tool)
+graph.add_node("assess_risk", llm_internal_reasoning)
+graph.add_node("approve_loan", call_approve_tool)
+graph.add_node("reject_loan", call_reject_tool)
+graph.add_node("flag_human", call_escalate_tool)
+
+# Define edges (flow between steps)
+graph.add_edge("fetch_credit_score", "fetch_income")
+graph.add_edge("fetch_income", "assess_risk")
+
+# Conditional edge (branching decision)
+graph.add_conditional_edge(
+   "assess_risk",
+   decide_outcome,   # function that returns low/high/uncertain
+   {
+     "low": "approve_loan",
+     "high": "reject_loan",
+     "uncertain": "flag_human"
+   }
+)
+
+# Run it
+graph.run(applicant_id)
+
+So why LangGraph specifically?
+Without LangGraph you'd struggle to manage:
+
+State — keeping track of credit score, income, ratio etc. as it moves through steps
+Branching — going to approve vs reject vs escalate based on results
+Loops — if documents are missing, loop back and request them
+Human in the loop — pausing the graph and waiting for a human to review before continuing
+
+LangGraph gives you all of this as first class features. It's essentially the orchestrator that runs your vocabulary plane in a controlled, stateful, branchable way.
+
+node - i understand, what is meant by edge and conditional edge
+
+Great question! Simple explanation:
+
+Edge — "what comes next"
+It's just a fixed connection between two nodes. After this step, always go to that step. No decision involved.
+fetch_credit_score → fetch_income
+After fetching credit score, ALWAYS go fetch income. Simple, no choice.
+
+Conditional Edge — "where to go depends on the result"
+Instead of always going to the same next node, it looks at the result and decides which node to go to next.
+assess_risk → approve?  or  reject?  or  escalate?
+It's like a junction on a road:
+
+Turn left if low risk
+Turn right if high risk
+Go straight if uncertain
+
+
+Real world analogy:
+Think of a loan officer's physical checklist:
+
+"Get credit score" → "Get income proof" → that's an edge (always happens in that order)
+"Review everything" → now decide → that's a conditional edge (outcome drives the next step)
+
+
+So in summary:
+
+Edge = always go here next
+Conditional edge = look at the result, then decide where to go next
+
+The conditional edge is where the intelligence of the agent really shows up — because the agent's reasoning determines which path is taken.
+
+tools i understand, can be defined in mcp client withoin agent project, how the internal reasoning logic is define
+
+Great question! Here's how internal reasoning logic is defined:
+
+Internal reasoning logic lives in two places:
+
+1. System Prompt
+This is where you define the "thinking rules" for the agent in natural language.
+You are a loan assessment agent.
+
+When assessing risk:
+- If credit score is above 750, consider low risk
+- If debt-to-income ratio exceeds 40%, consider high risk
+- If employment is less than 6 months, flag for human review
+- Never approve loans above $50,000 without human review
+That's it. You're literally telling the agent how to think and decide in plain English.
+
+2. Node function in LangGraph
+Each internal reasoning node is where you invoke the LLM with the current state and let it reason.
+def assess_risk(state):
+    # state has all fetched data so far
+    # pass it to LLM with system prompt rules
+    result = llm.invoke(state + system_prompt)
+    # LLM reasons internally and returns decision
+    return result  # low / high / uncertain
+The LLM reads the data in state, applies the rules from system prompt, and returns a decision.
+
+So the combination is:
+
+System prompt → defines the reasoning rules (the "policy")
+Node function → is where that reasoning actually gets triggered with real data
+State → carries the data (credit score, income etc.) from node to node so the LLM has everything it needs to reason
+
+
+Simple analogy:
+System prompt is like the training manual you give a loan officer. The node is the moment they sit down and actually apply that manual to a real application.
+
+can you tell me from a class perspective - how this is structured for this loan example. just need class and method name (like a class diagram) and how each class are releated
+
+Great! Here's how it would look from a class perspective:
+
+Classes and their methods:
+LoanAgent
+  - run(applicant_id)
+  - build_graph()
+
+LoanTools  (vocabulary plane - external)
+  - get_credit_score(applicant_id)
+  - get_income(applicant_id)
+  - get_employment_status(applicant_id)
+  - approve_loan(applicant_id, amount)
+  - reject_loan(applicant_id, reason)
+  - flag_for_human_review(applicant_id)
+
+LoanAssessor  (vocabulary plane - internal reasoning)
+  - assess_risk(state)
+  - calculate_debt_to_income(income, debt)
+  - decide_outcome(state)
+
+LoanState  (data carrier)
+  - applicant_id
+  - credit_score
+  - income
+  - employment_status
+  - debt_to_income_ratio
+  - risk_level
+  - decision
+
+LoanGraph  (orchestrator)
+  - add_nodes()
+  - add_edges()
+  - add_conditional_edges()
+  - compile()
+  - run(state)
+
+SystemPrompt  (reasoning rules)
+  - load_prompt()
+  - get_assessment_rules()
+
+How they relate:
+LoanAgent
+  ├── owns → LoanGraph
+  ├── owns → LoanState
+  └── uses → SystemPrompt
+
+LoanGraph
+  ├── nodes use → LoanTools (external calls)
+  ├── nodes use → LoanAssessor (internal reasoning)
+  └── carries → LoanState between every node
+
+LoanAssessor
+  ├── reads → LoanState (to get fetched data)
+  ├── uses → SystemPrompt (to apply rules)
+  └── writes → LoanState (risk_level, decision)
+
+LoanTools
+  ├── reads → LoanState (to know who to fetch for)
+  └── writes → LoanState (credit_score, income etc.)
+
+In one line how they connect:
+
+LoanAgent builds the LoanGraph, which moves LoanState through nodes, where each node either calls LoanTools to fetch external data or calls LoanAssessor to reason internally using SystemPrompt rules — and writes results back to LoanState.
+
+
+Flow in class terms:
+LoanAgent.run()
+  → LoanGraph.run(LoanState)
+      → node: LoanTools.get_credit_score() → updates LoanState
+      → node: LoanTools.get_income()       → updates LoanState
+      → node: LoanAssessor.assess_risk()   → reads LoanState + SystemPrompt
+      → conditional edge: LoanAssessor.decide_outcome()
+          → LoanTools.approve_loan()  or
+          → LoanTools.reject_loan()   or
+          → LoanTools.flag_for_human_review()
+This gives you a clean separation — tools handle the outside world, assessor handles the thinking, state carries everything, and graph orchestrates the flow.
