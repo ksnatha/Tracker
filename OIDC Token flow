@@ -1,0 +1,107 @@
+# DSSO + MFA + OIDC Token Flow
+## Sequence of Steps — Dos and Don'ts
+
+---
+
+## Step 1 — User Hits Your App
+- App checks if a valid Access Token exists in JS memory
+- If not → redirect to IdP
+- ✅ Do not store anything yet at this point
+
+---
+
+## Step 2 — DSSO Kicks In Silently
+- IdP detects Windows desktop identity automatically in the background
+- No username, no password prompt — user feels nothing
+- ✅ OS logged-in session handles identity transparently
+
+---
+
+## Step 3 — MFA Challenge Appears
+- Identity confirmed via DSSO, but IdP still needs second factor
+- User sees only the MFA prompt — push notification or OTP
+- User approves it
+- ✅ This is the only interaction the user ever has during first login
+
+---
+
+## Step 4 — IdP Issues Tokens
+- IdP sends back two tokens to your app
+- **Access Token** — valid for 30 minutes
+- **Refresh Token** — must be configured for at least 1 day validity
+- ✅ Receive both tokens on your **backend**, not directly in browser
+- ❌ Never let Refresh Token touch the browser JS layer at all
+- ❌ Never expose Refresh Token in API response body to frontend
+
+---
+
+## Step 5 — Storing the Tokens
+- ✅ Access Token → keep in **JS memory** (simple variable) on frontend
+- ✅ Refresh Token → store in **HttpOnly Secure cookie** set by your backend
+- ❌ Never store Refresh Token in **localStorage or sessionStorage** — XSS attack can steal it
+- ❌ Never store Refresh Token in a **regular JS-readable cookie**
+- ❌ Never store Access Token in **localStorage** — memory is safer
+
+---
+
+## Step 6 — Making API Calls
+- ✅ Decode Access Token JWT and check expiry before every call
+- ✅ If expiry is within ~10 seconds → refresh proactively before calling
+- ✅ Send Access Token as **Authorization Bearer header** in every request
+- ❌ Never send Access Token as a URL query parameter — gets logged in server logs
+
+---
+
+## Step 7 — Access Token Expires (after 30 min)
+- App gets a 401 from the API
+- ✅ Catch that 401 → silently call your backend to refresh
+- ✅ Backend reads Refresh Token from HttpOnly cookie → calls IdP → gets new Access Token
+- ✅ Return new Access Token to frontend JS memory only
+- ❌ Do not show login screen to user — must be completely invisible to them
+- ❌ Do not send Refresh Token to frontend even during this exchange
+
+---
+
+## Step 8 — User Closes Browser / Comes Back Within 1 Day
+- JS memory is wiped — Access Token is gone, that is fine
+- ✅ HttpOnly cookie with Refresh Token is still there — browser persists it
+- ✅ User hits the app → backend reads cookie → calls IdP with Refresh Token → gets new Access Token
+- ✅ User goes straight in — no DSSO, no MFA again
+- ❌ Do not ask user to log in again just because they closed the tab
+
+---
+
+## Step 9 — Refresh Token Expires (after 1 day)
+- Backend tries to use Refresh Token → IdP rejects it
+- ✅ Clear the HttpOnly cookie
+- ✅ Redirect user back to IdP → DSSO kicks in silently again → MFA prompt appears
+- ✅ On success → fresh Access Token + fresh Refresh Token → store again as before
+- ❌ Do not retry with expired Refresh Token in a loop — handle the error cleanly and redirect
+
+---
+
+## Step 10 — User Explicitly Logs Out
+- ✅ Backend clears the HttpOnly cookie
+- ✅ Call IdP logout endpoint to invalidate Refresh Token server side
+- ✅ Clear Access Token from JS memory
+- ❌ Just clearing frontend memory is not enough — Refresh Token must be revoked at IdP too
+
+---
+
+## Quick Summary Card
+
+| What | Where to Store | What Not to Do |
+|---|---|---|
+| Access Token | JS memory only | localStorage, sessionStorage, cookie |
+| Refresh Token | HttpOnly Secure cookie (backend set) | Anywhere JS can read it |
+| User identity / claims | JS memory (decoded from Access Token) | localStorage |
+
+---
+
+## Lifecycle in One Line
+
+```
+DSSO (silent) → MFA (user sees this once) → Access Token (30 min, memory)
+→ Refresh Token (1 day, HttpOnly cookie) → Silent refresh on expiry
+→ After 1 day → DSSO + MFA again
+```
