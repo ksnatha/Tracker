@@ -49,3 +49,6 @@ Articles and papers behind the approach in `AGENTS.md`, `devin-playbook.md`, and
 | Parity against recorded legacy behavior | Fixtures and parity tests (`AGENTS.md` section 5) |
 | One small, independently validated unit per session | Playbook workflow, one slice per session |
 | Freeze the slice during analysis | Spec prompt reviewer notes |
+
+
+https://www.wwt.com/blog/part-2-devin-autonomous-ai-for-modernization
