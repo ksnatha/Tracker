@@ -25,3 +25,13 @@ Rules for this run:
 - If the playbook mentions another playbook or step, treat it as a note for a
   human. Do not do that work.
 - Stop at the end of Part A, open a PR, and wait for my approval. Do not start Part B.
+
+
+For Part B (later, in a new session, after you approve Part A)
+
+First commit your target docs to docs/design/architecture.md and docs/design/db-model.md. Then send the same message with these changes:
+
+Replace “Run Part A only” with “Run Part B only. Part A is approved and merged.”
+Remove the rule about not reading the target design.
+Add: “Read only the sections of the architecture and DB model on modules or services, data ownership and communication.”
+Replace the last bullet with: “Stop at the end of the decision round and wait for my confirmation.”
